@@ -21,6 +21,7 @@
 #include "applets/RxApplet.h"
 #include "applets/TxApplet.h"
 #include "SpectrumOverlayPanel.h"
+#include "SetupDialog.h"
 
 #include <cmath>
 
@@ -334,8 +335,10 @@ void MainWindow::buildMenuBar()
     // =========================================================
     auto* fileMenu = menuBar()->addMenu(QStringLiteral("&File"));
 
-    fileMenu->addAction(QStringLiteral("&Settings..."), this, []() {
-        qCDebug(lcConnection) << "Settings requested (Task 11 NYI)";
+    fileMenu->addAction(QStringLiteral("&Settings..."), this, [this]() {
+        auto* dialog = new SetupDialog(m_radioModel, this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->show();
     });
 
     fileMenu->addSeparator();

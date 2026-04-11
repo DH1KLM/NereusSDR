@@ -214,6 +214,8 @@ set(GUI_SOURCES
     src/gui/applets/DvkApplet.cpp
     src/gui/applets/CatApplet.cpp
     src/gui/applets/TunerApplet.cpp
+    src/gui/SetupPage.cpp
+    src/gui/SetupDialog.cpp
 )
 
 # --------------------------------------------------------------------------
