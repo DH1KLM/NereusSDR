@@ -100,6 +100,8 @@ public:
     // --- Content Slot ---
     QWidget* content() const { return m_content; }
     void setContent(QWidget* widget);
+    void addContentWidget(QWidget* widget);
+    void clearContent();
 
     // --- Serialization ---
     QString serialize() const;

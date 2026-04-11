@@ -18,6 +18,9 @@ class SpectrumWidget;
 class ContainerManager;
 class MeterWidget;
 class MeterPoller;
+class RxApplet;
+class TxApplet;
+class SpectrumOverlayPanel;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -47,9 +50,12 @@ private:
     ConnectionPanel* m_connectionPanel{nullptr};
     SupportDialog* m_supportDialog{nullptr};
 
-    // Status bar widgets
+    // Status bar widgets (double-height AetherSDR pattern)
     QLabel* m_connStatusLabel{nullptr};
     QLabel* m_radioInfoLabel{nullptr};
+    QLabel* m_callsignLabel{nullptr};
+    QLabel* m_utcTimeLabel{nullptr};
+    QTimer* m_clockTimer{nullptr};
 
     // Wisdom generation dialog (shown on first run)
     QProgressDialog* m_wisdomDialog{nullptr};
@@ -75,6 +81,14 @@ private:
     MeterWidget* m_meterWidget{nullptr};
     MeterPoller* m_meterPoller{nullptr};
     void populateDefaultMeter();
+
+    // Applets (Phase 3G-3)
+    RxApplet*    m_rxApplet{nullptr};
+    TxApplet*    m_txApplet{nullptr};
+    MeterWidget* m_txMeterWidget{nullptr};
+
+    // Spectrum overlay panel (Phase 3 UI)
+    SpectrumOverlayPanel* m_overlayPanel{nullptr};
 };
 
 } // namespace NereusSDR

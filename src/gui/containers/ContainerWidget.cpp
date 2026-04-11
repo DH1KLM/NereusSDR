@@ -162,6 +162,30 @@ void ContainerWidget::setContent(QWidget* widget)
     }
 }
 
+void ContainerWidget::addContentWidget(QWidget* widget)
+{
+    if (!widget) {
+        return;
+    }
+    widget->setParent(m_contentHolder);
+    widget->setMouseTracking(true);
+    widget->installEventFilter(this);
+    m_contentHolder->layout()->addWidget(widget);
+}
+
+void ContainerWidget::clearContent()
+{
+    QLayout* layout = m_contentHolder->layout();
+    m_content = nullptr;
+    while (QLayoutItem* item = layout->takeAt(0)) {
+        if (QWidget* w = item->widget()) {
+            w->setParent(nullptr);
+            w->deleteLater();
+        }
+        delete item;
+    }
+}
+
 void ContainerWidget::updateTitleBar()
 {
     // Thetis ucMeter.cs:605-624 — adapted for 3 dock modes
