@@ -200,6 +200,7 @@ set(GUI_SOURCES
     src/gui/meters/ItemGroup.cpp
     src/gui/meters/MeterPoller.cpp
     src/gui/applets/AppletWidget.cpp
+    src/gui/applets/NyiOverlay.cpp
 )
 
 # --------------------------------------------------------------------------
