@@ -18,6 +18,8 @@ class SpectrumWidget;
 class ContainerManager;
 class MeterWidget;
 class MeterPoller;
+class RxApplet;
+class TxApplet;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -75,6 +77,11 @@ private:
     MeterWidget* m_meterWidget{nullptr};
     MeterPoller* m_meterPoller{nullptr};
     void populateDefaultMeter();
+
+    // Applets (Phase 3G-3)
+    RxApplet*    m_rxApplet{nullptr};
+    TxApplet*    m_txApplet{nullptr};
+    MeterWidget* m_txMeterWidget{nullptr};
 };
 
 } // namespace NereusSDR

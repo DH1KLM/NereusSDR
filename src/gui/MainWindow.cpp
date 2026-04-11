@@ -18,6 +18,8 @@
 #include "meters/MeterItem.h"
 #include "meters/ItemGroup.h"
 #include "meters/MeterPoller.h"
+#include "applets/RxApplet.h"
+#include "applets/TxApplet.h"
 
 #include <cmath>
 
@@ -230,6 +232,9 @@ void MainWindow::buildUI()
     if (m_meterWidget) {
         m_meterPoller->addTarget(m_meterWidget);
     }
+    if (m_txMeterWidget) {
+        m_meterPoller->addTarget(m_txMeterWidget);
+    }
 
     // Wire RxChannel to poller when WDSP finishes initializing.
     // RadioModel's initializedChanged handler creates the RxChannel, but
@@ -271,28 +276,47 @@ void MainWindow::populateDefaultMeter()
         return;
     }
 
-    m_meterWidget = new MeterWidget();
+    c0->clearContent();
 
-    // S-Meter: top 55% — arc needle bound to SignalAvg
+    // --- RX S-Meter ---
+    m_meterWidget = new MeterWidget();
+    m_meterWidget->setFixedHeight(120);
+
+    // S-Meter: full widget — arc needle bound to SignalAvg
     // From Thetis MeterManager.cs: ANAN needle uses AVG_SIGNAL_STRENGTH
     ItemGroup* smeter = ItemGroup::createSMeterPreset(
         MeterBinding::SignalAvg, QStringLiteral("S-Meter"), m_meterWidget);
-    smeter->installInto(m_meterWidget, 0.0f, 0.0f, 1.0f, 0.55f);
+    smeter->installInto(m_meterWidget, 0.0f, 0.0f, 1.0f, 1.0f);
     delete smeter;
 
-    // Power/SWR: middle 30% — stacked bars (stub TX bindings)
+    c0->addContentWidget(m_meterWidget);
+
+    // --- RX Applet ---
+    m_rxApplet = new RxApplet(m_radioModel);
+    c0->addContentWidget(m_rxApplet);
+
+    // --- TX Meter (Power/SWR + ALC) ---
+    m_txMeterWidget = new MeterWidget();
+    m_txMeterWidget->setFixedHeight(80);
+
+    // Power/SWR: upper 65% of TX meter
     ItemGroup* pwrSwr = ItemGroup::createPowerSwrPreset(
-        QStringLiteral("Power/SWR"), m_meterWidget);
-    pwrSwr->installInto(m_meterWidget, 0.0f, 0.55f, 1.0f, 0.30f);
+        QStringLiteral("Power/SWR"), m_txMeterWidget);
+    pwrSwr->installInto(m_txMeterWidget, 0.0f, 0.0f, 1.0f, 0.65f);
     delete pwrSwr;
 
-    // ALC: bottom 15% — horizontal bar (stub TX binding)
-    ItemGroup* alc = ItemGroup::createAlcPreset(m_meterWidget);
-    alc->installInto(m_meterWidget, 0.0f, 0.85f, 1.0f, 0.15f);
+    // ALC: lower 35% of TX meter
+    ItemGroup* alc = ItemGroup::createAlcPreset(m_txMeterWidget);
+    alc->installInto(m_txMeterWidget, 0.0f, 0.65f, 1.0f, 0.35f);
     delete alc;
 
-    c0->setContent(m_meterWidget);
-    qCDebug(lcMeter) << "Installed default meter layout: S-Meter + Power/SWR + ALC";
+    c0->addContentWidget(m_txMeterWidget);
+
+    // --- TX Applet ---
+    m_txApplet = new TxApplet(m_radioModel);
+    c0->addContentWidget(m_txApplet);
+
+    qCDebug(lcMeter) << "Installed mixed Container #0: SMeter + RxApplet + Power/SWR/ALC + TxApplet";
 }
 
 void MainWindow::buildMenuBar()
@@ -582,6 +606,11 @@ void MainWindow::wireSliceToSpectrum()
             }
         }
     });
+
+    // Wire RxApplet to the active slice
+    if (m_rxApplet) {
+        m_rxApplet->setSlice(slice);
+    }
 
     // Set initial lock state
     m_radioModel->receiverManager()->setDdcFrequencyLocked(
