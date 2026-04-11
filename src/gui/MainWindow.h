@@ -50,9 +50,12 @@ private:
     ConnectionPanel* m_connectionPanel{nullptr};
     SupportDialog* m_supportDialog{nullptr};
 
-    // Status bar widgets
+    // Status bar widgets (double-height AetherSDR pattern)
     QLabel* m_connStatusLabel{nullptr};
     QLabel* m_radioInfoLabel{nullptr};
+    QLabel* m_callsignLabel{nullptr};
+    QLabel* m_utcTimeLabel{nullptr};
+    QTimer* m_clockTimer{nullptr};
 
     // Wisdom generation dialog (shown on first run)
     QProgressDialog* m_wisdomDialog{nullptr};
