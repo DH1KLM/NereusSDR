@@ -201,6 +201,7 @@ set(GUI_SOURCES
     src/gui/meters/MeterPoller.cpp
     src/gui/applets/AppletWidget.cpp
     src/gui/applets/NyiOverlay.cpp
+    src/gui/applets/RxApplet.cpp
 )
 
 # --------------------------------------------------------------------------
