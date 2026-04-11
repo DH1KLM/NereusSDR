@@ -20,6 +20,7 @@
 #include "meters/MeterPoller.h"
 #include "applets/RxApplet.h"
 #include "applets/TxApplet.h"
+#include "SpectrumOverlayPanel.h"
 
 #include <cmath>
 
@@ -139,6 +140,12 @@ void MainWindow::buildUI()
     m_spectrumWidget->loadSettings();
     m_spectrumWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     layout->addWidget(m_spectrumWidget, 1);
+
+    // --- Spectrum overlay panel (Phase 3 UI) ---
+    m_overlayPanel = new SpectrumOverlayPanel(m_radioModel, m_spectrumWidget);
+    m_overlayPanel->move(4, 4);
+    m_overlayPanel->show();
+    m_overlayPanel->raise();
 
     // Zoom slider bar below spectrum
     auto* zoomBar = new QSlider(Qt::Horizontal, spectrumPane);
@@ -610,6 +617,49 @@ void MainWindow::wireSliceToSpectrum()
     // Wire RxApplet to the active slice
     if (m_rxApplet) {
         m_rxApplet->setSlice(slice);
+    }
+
+    // --- SpectrumOverlayPanel wiring (Phase 3 UI) ---
+    if (m_overlayPanel) {
+        m_overlayPanel->setSlice(slice);
+
+        connect(m_overlayPanel, &SpectrumOverlayPanel::bandSelected,
+                this, [slice](const QString& /*bandName*/, double freqHz, const QString& /*mode*/) {
+            slice->setFrequency(freqHz);
+        });
+
+        connect(m_overlayPanel, &SpectrumOverlayPanel::nrToggled,
+                this, [this](bool on) {
+            RxChannel* rxCh = m_radioModel->wdspEngine()->rxChannel(0);
+            if (rxCh) { rxCh->setNrEnabled(on); }
+        });
+
+        connect(m_overlayPanel, &SpectrumOverlayPanel::nbToggled,
+                this, [this](bool on) {
+            RxChannel* rxCh = m_radioModel->wdspEngine()->rxChannel(0);
+            if (rxCh) { rxCh->setNb1Enabled(on); }
+        });
+
+        connect(m_overlayPanel, &SpectrumOverlayPanel::anfToggled,
+                this, [this](bool on) {
+            RxChannel* rxCh = m_radioModel->wdspEngine()->rxChannel(0);
+            if (rxCh) { rxCh->setAnfEnabled(on); }
+        });
+
+        connect(m_overlayPanel, &SpectrumOverlayPanel::wfColorGainChanged,
+                this, [this](int gain) {
+            m_spectrumWidget->setWfColorGain(gain);
+        });
+
+        connect(m_overlayPanel, &SpectrumOverlayPanel::wfBlackLevelChanged,
+                this, [this](int level) {
+            m_spectrumWidget->setWfBlackLevel(level);
+        });
+
+        connect(m_overlayPanel, &SpectrumOverlayPanel::colorSchemeChanged,
+                this, [this](int index) {
+            m_spectrumWidget->setWfColorScheme(static_cast<WfColorScheme>(index));
+        });
     }
 
     // Set initial lock state

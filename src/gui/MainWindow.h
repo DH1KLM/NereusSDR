@@ -20,6 +20,7 @@ class MeterWidget;
 class MeterPoller;
 class RxApplet;
 class TxApplet;
+class SpectrumOverlayPanel;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -82,6 +83,9 @@ private:
     RxApplet*    m_rxApplet{nullptr};
     TxApplet*    m_txApplet{nullptr};
     MeterWidget* m_txMeterWidget{nullptr};
+
+    // Spectrum overlay panel (Phase 3 UI)
+    SpectrumOverlayPanel* m_overlayPanel{nullptr};
 };
 
 } // namespace NereusSDR
