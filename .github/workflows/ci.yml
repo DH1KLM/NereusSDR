@@ -6,6 +6,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:
@@ -72,18 +76,59 @@ jobs:
           cp /tmp/fftw3/libfftw3-3.def $GITHUB_WORKSPACE/third_party/fftw3/lib/
 
       # ------------------------------------------------------------------
+      # Compiler cache (ccache for Linux/macOS, sccache for Windows)
+      # ------------------------------------------------------------------
+      - name: Install ccache (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y ccache
+
+      - name: Install ccache (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ccache
+
+      - name: Restore ccache
+        if: runner.os != 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-
+
+      - name: Configure ccache
+        if: runner.os != 'Windows'
+        run: |
+          ccache --max-size=2G
+          ccache --zero-stats
+
+      # Windows intentionally skips sccache. The GitHub Actions Cache backend
+      # (Azure Blob) had a multi-hour outage during Phase 3N shakedown that
+      # caused sccache startup to fail hard ("Server startup failed: cache
+      # storage failed to read: <h2>Our services aren't available right now</h2>"),
+      # and sccache has no graceful fallback. 'sccache --show-stats' is not a
+      # reliable probe because it queries a freshly started empty server that
+      # hasn't touched the backend yet. Qt install is already cached via
+      # install-qt-action's cache: true, which is the dominant cost anyway.
+
+      # ------------------------------------------------------------------
       # Configure
       # ------------------------------------------------------------------
       - name: Configure (Linux)
         if: runner.os == 'Linux'
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Configure (macOS)
         if: runner.os == 'macOS'
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH="$(brew --prefix)"
+            -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
@@ -103,3 +148,41 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: cmake --build build -j$NUMBER_OF_PROCESSORS
+
+      # ------------------------------------------------------------------
+      # Test
+      # ------------------------------------------------------------------
+      - name: Test
+        working-directory: build
+        shell: bash
+        run: ctest --output-on-failure --no-tests=ignore
+
+      # ------------------------------------------------------------------
+      # PR artifact upload
+      # ------------------------------------------------------------------
+      - name: Locate built binary
+        if: github.event_name == 'pull_request'
+        id: locate
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Linux)   echo "binary=build/NereusSDR" >> "$GITHUB_OUTPUT" ;;
+            macOS)   echo "binary=build/NereusSDR.app" >> "$GITHUB_OUTPUT" ;;
+            Windows) echo "binary=build/NereusSDR.exe" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Upload PR build artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: NereusSDR-pr${{ github.event.number }}-${{ matrix.name }}
+          path: ${{ steps.locate.outputs.binary }}
+          retention-days: 7
+          if-no-files-found: warn
+
+      # ------------------------------------------------------------------
+      # Cache stats
+      # ------------------------------------------------------------------
+      - name: ccache stats
+        if: runner.os != 'Windows'
+        run: ccache --show-stats
