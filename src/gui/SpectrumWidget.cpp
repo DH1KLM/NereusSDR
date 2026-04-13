@@ -153,7 +153,33 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     setAttribute(Qt::WA_NativeWindow);
     setAttribute(Qt::WA_Hover);  // Ensure HoverMove events are delivered
 #elif defined(Q_OS_WIN)
-    setApi(QRhiWidget::Api::Direct3D11);
+    // Windows default: OpenGL. The D3D11 path has a latent pipeline
+    // regression introduced in the Phase 3G-8 renderer additions
+    // (commits 5b08ba9, 62819af, c447ed9, 2d05772 — averaging modes,
+    // peak hold, overlay textures, trace fill, FPS overlay) that
+    // reproduces across 0.1.1 installer + local builds: window and
+    // menus render fine but the SpectrumWidget surface is blank.
+    //
+    // OpenGL path works on the same hardware and has no known issues.
+    // Users who want to re-test D3D11 after the root cause is fixed
+    // can force it at launch via the Qt-standard QT_RHI_BACKEND=d3d11
+    // environment variable, or set NEREUS_RHI_BACKEND=d3d11 which
+    // this block honours for forward-compatibility.
+    //
+    // Diagnostic script: docs/debugging/windows-spectrum-diagnose.ps1
+    // Tracked in docs/debugging/phase3i-smoke-test.md roadmap.
+    {
+        const QByteArray nereusBackend = qgetenv("NEREUS_RHI_BACKEND").toLower();
+        if (nereusBackend == "d3d11" || nereusBackend == "direct3d11") {
+            setApi(QRhiWidget::Api::Direct3D11);
+        } else if (nereusBackend == "d3d12" || nereusBackend == "direct3d12") {
+            setApi(QRhiWidget::Api::Direct3D12);
+        } else if (nereusBackend == "vulkan") {
+            setApi(QRhiWidget::Api::Vulkan);
+        } else {
+            setApi(QRhiWidget::Api::OpenGL);
+        }
+    }
     setAttribute(Qt::WA_NativeWindow);
 #endif
 #else
