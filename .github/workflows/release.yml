@@ -1,0 +1,513 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to (re-)build, e.g. v0.2.0'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Resolve tag and validate format
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "Tag: $TAG"
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::Tag '$TAG' does not match vMAJOR.MINOR.PATCH[-suffix]"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$TAG" =~ -(alpha|beta|rc) ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify CMakeLists.txt version matches tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          CMAKE_VER=$(grep -oE 'project\(NereusSDR VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | awk '{print $3}')
+          TAG_VER="${{ steps.meta.outputs.version }}"
+          BASE_VER="${TAG_VER%%-*}"
+          if [[ "$CMAKE_VER" != "$BASE_VER" ]]; then
+            echo "::error::CMakeLists.txt version ($CMAKE_VER) != tag version ($BASE_VER)"
+            exit 1
+          fi
+          echo "Version match: $CMAKE_VER"
+
+      - name: Extract release notes from CHANGELOG.md
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.meta.outputs.version }}"
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" {flag=1; next}
+            flag && /^## \[/ {flag=0}
+            flag {print}
+          ' CHANGELOG.md > release_notes.md
+          if [[ ! -s release_notes.md ]]; then
+            echo "::error::No CHANGELOG.md section found for version $VERSION"
+            exit 1
+          fi
+          echo "----- release notes -----"
+          cat release_notes.md
+          echo "-------------------------"
+
+      - name: Append release-notes template
+        shell: bash
+        run: |
+          if [[ -f .github/release-notes-template.md ]]; then
+            echo "" >> release_notes.md
+            cat .github/release-notes-template.md >> release_notes.md
+          fi
+
+      - name: Upload release notes artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release_notes.md
+          retention-days: 1
+
+  build-linux:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x86_64
+            use_aqt: true
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            use_aqt: false
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config ccache \
+            libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 \
+            libxcb-render-util0 libxcb-xinerama0 libxcb-randr0 libxcb-xfixes0 \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-pulseaudio gstreamer1.0-gl \
+            libgstreamer-gl1.0-0 libgstreamer-plugins-base1.0-0 \
+            libfuse2 file desktop-file-utils \
+            libfftw3-dev imagemagick
+
+      - name: Install system Qt (ARM only)
+        if: matrix.use_aqt == false
+        run: |
+          sudo apt-get install -y qt6-base-dev qt6-multimedia-dev \
+            qt6-base-private-dev
+
+      - name: Install Qt 6.7 via aqtinstall (x86_64)
+        if: matrix.use_aqt == true
+        run: |
+          pip3 install aqtinstall
+          aqt install-qt linux desktop 6.7.3 linux_gcc_64 \
+            -m qtmultimedia \
+            --outputdir ${{ github.workspace }}/Qt
+          echo "Qt6_DIR=${{ github.workspace }}/Qt/6.7.3/gcc_64/lib/cmake/Qt6" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=${{ github.workspace }}/Qt/6.7.3/gcc_64" >> $GITHUB_ENV
+          echo "PATH=${{ github.workspace }}/Qt/6.7.3/gcc_64/bin:$PATH" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/Qt/6.7.3/gcc_64/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: release-ccache-linux-${{ matrix.arch }}-${{ needs.prepare.outputs.tag }}
+          restore-keys: |
+            release-ccache-linux-${{ matrix.arch }}-
+
+      - name: Configure
+        run: |
+          ccache --max-size=2G
+          CMAKE_EXTRA=""
+          if [ "${{ matrix.use_aqt }}" = "true" ]; then
+            CMAKE_EXTRA="-DCMAKE_PREFIX_PATH=${{ github.workspace }}/Qt/6.7.3/gcc_64"
+          fi
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            $CMAKE_EXTRA
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure --no-tests=ignore
+
+      - name: Install to AppDir
+        run: |
+          DESTDIR=${{ github.workspace }}/AppDir cmake --install build
+
+      - name: Download linuxdeploy + Qt plugin
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${{ matrix.arch }}.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-${{ matrix.arch }}.AppImage
+          chmod +x linuxdeploy-${{ matrix.arch }}.AppImage linuxdeploy-plugin-qt-${{ matrix.arch }}.AppImage
+
+      - name: Build AppImage
+        env:
+          LDAI_OUTPUT: NereusSDR-${{ needs.prepare.outputs.version }}-${{ matrix.arch }}.AppImage
+          QT_SELECT: qt6
+          EXTRA_QT_PLUGINS: multimedia
+        run: |
+          if [ "${{ matrix.use_aqt }}" = "true" ]; then
+            export QMAKE=${{ github.workspace }}/Qt/6.7.3/gcc_64/bin/qmake
+          else
+            export QMAKE=$(which qmake6 2>/dev/null || which qmake)
+          fi
+          mkdir -p AppDir/usr/share/applications
+          cat > AppDir/usr/share/applications/NereusSDR.desktop << 'DESKTOP'
+          [Desktop Entry]
+          Type=Application
+          Name=NereusSDR
+          Exec=NereusSDR
+          Icon=nereussdr
+          Categories=HamRadio;Audio;
+          Comment=Cross-platform OpenHPSDR SDR Console
+          DESKTOP
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          convert -size 256x256 xc:"#0f0f1a" -fill "#00b4d8" -gravity center \
+            -pointsize 48 -annotate +0+0 "NSDR" \
+            AppDir/usr/share/icons/hicolor/256x256/apps/nereussdr.png 2>/dev/null || \
+          touch AppDir/usr/share/icons/hicolor/256x256/apps/nereussdr.png
+
+          ./linuxdeploy-${{ matrix.arch }}.AppImage \
+            --appdir AppDir \
+            --plugin qt \
+            --desktop-file AppDir/usr/share/applications/NereusSDR.desktop \
+            --output appimage
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: NereusSDR-*.AppImage
+          retention-days: 7
+
+  build-macos:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            dmg_suffix: macOS-apple-silicon
+            deployment_target: "14.0"
+    # Intel Mac (macos-13) build dropped: GitHub Actions reports the runner
+    # label as unsupported ("configuration 'macos-13-us-default' is not
+    # supported") as of Phase 3N shakedown 2026-04-12. Intel Mac users should
+    # build from source until either the runner is restored OR we cross-
+    # compile an x86_64 binary on macos-15 via CMAKE_OSX_ARCHITECTURES.
+    # Tracked for Phase 3N+1.
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Install dependencies
+        run: brew install qt@6 ninja create-dmg fftw ccache
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: release-ccache-macos-${{ matrix.arch }}-${{ needs.prepare.outputs.tag }}
+          restore-keys: |
+            release-ccache-macos-${{ matrix.arch }}-
+
+      - name: Configure
+        run: |
+          ccache --max-size=2G
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="${{ matrix.deployment_target }}" \
+            -DCMAKE_OSX_ARCHITECTURES="${{ matrix.arch }}" \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build -j$(sysctl -n hw.ncpu)
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure --no-tests=ignore
+
+      - name: Bundle Qt frameworks
+        run: |
+          $(brew --prefix qt@6)/bin/macdeployqt build/NereusSDR.app \
+            -verbose=1 -always-overwrite
+
+      - name: Ad-hoc codesign
+        run: |
+          codesign --force --deep --sign - build/NereusSDR.app
+          codesign --verify --verbose=2 build/NereusSDR.app
+
+      - name: Create DMG
+        run: |
+          create-dmg \
+            --volname "NereusSDR" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "NereusSDR.app" 150 110 \
+            --hide-extension "NereusSDR.app" \
+            --app-drop-link 450 110 \
+            "NereusSDR-${{ needs.prepare.outputs.version }}-${{ matrix.dmg_suffix }}.dmg" \
+            "build/NereusSDR.app" \
+          || true
+          ls -la NereusSDR-*.dmg
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: NereusSDR-*.dmg
+          retention-days: 7
+
+  build-windows:
+    needs: prepare
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.*'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2019_64'
+          modules: 'qtmultimedia qtserialport qtwebsockets qtshadertools'
+          cache: true
+
+      - name: Install Ninja and NSIS
+        run: |
+          choco install ninja -y
+          choco install nsis -y
+
+      # sccache intentionally not used on Windows — see ci.yml for the
+      # explanation. Qt is already cached via install-qt-action.
+
+      - name: Setup FFTW3
+        shell: pwsh
+        run: |
+          $fftw_dir = "third_party/fftw3"
+          New-Item -ItemType Directory -Force -Path "$fftw_dir/include", "$fftw_dir/lib", "$fftw_dir/bin"
+          Invoke-WebRequest -Uri "https://fftw.org/pub/fftw/fftw-3.3.5-dll64.zip" -OutFile fftw.zip
+          Expand-Archive -Path fftw.zip -DestinationPath fftw-tmp
+          Copy-Item fftw-tmp/fftw3.h "$fftw_dir/include/"
+          Copy-Item fftw-tmp/libfftw3-3.dll "$fftw_dir/bin/"
+          cd fftw-tmp
+          lib /def:libfftw3-3.def /out:fftw3.lib /machine:x64
+          cd ..
+          Copy-Item fftw-tmp/fftw3.lib "$fftw_dir/lib/"
+
+      - name: Configure
+        shell: bash
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        shell: bash
+        run: cmake --build build -j${NUMBER_OF_PROCESSORS}
+
+      - name: Test
+        working-directory: build
+        shell: bash
+        run: ctest --output-on-failure --no-tests=ignore
+
+      - name: Deploy Qt
+        shell: pwsh
+        run: |
+          mkdir deploy
+          copy build\NereusSDR.exe deploy\
+          windeployqt deploy\NereusSDR.exe --release --no-translations --no-system-d3d-compiler
+          if (Test-Path "third_party\fftw3\bin\libfftw3-3.dll") {
+            copy third_party\fftw3\bin\libfftw3-3.dll deploy\
+          }
+
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          $name = "NereusSDR-${{ needs.prepare.outputs.version }}-Windows-x64-portable.zip"
+          Compress-Archive -Path deploy\* -DestinationPath $name
+
+      - name: Build NSIS installer
+        shell: pwsh
+        run: |
+          $version = "${{ needs.prepare.outputs.version }}"
+          # Strip any prerelease suffix (e.g. 0.1.0-alpha -> 0.1.0) for VIProductVersion,
+          # which NSIS requires to be exactly 4 numeric dot-separated components.
+          $versionNumeric = $version -replace '-.*$', ''
+          $deploy  = (Resolve-Path deploy).Path
+          # NSIS resolves a relative OutFile against the .nsi file's directory,
+          # not the invocation CWD. Pass an absolute path so the installer
+          # lands in the repo root where the upload-artifact glob finds it.
+          $repoRoot = (Resolve-Path .).Path
+          $outfile  = Join-Path $repoRoot "NereusSDR-$version-Windows-x64-setup.exe"
+          & "C:\Program Files (x86)\NSIS\makensis.exe" `
+              /DNSDR_VERSION=$version `
+              /DNSDR_VERSION_NUMERIC=$versionNumeric `
+              /DNSDR_DEPLOYDIR=$deploy `
+              /DNSDR_OUTFILE=$outfile `
+              scripts\windows\installer.nsi
+          if (-not (Test-Path $outfile)) {
+            Write-Error "NSIS did not produce $outfile"
+            exit 1
+          }
+          Get-Item $outfile
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: |
+            NereusSDR-*.zip
+            NereusSDR-*-setup.exe
+          retention-days: 7
+
+  sign-and-publish:
+    needs: [prepare, build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p artifacts
+          find downloaded -type f \( \
+            -name '*.AppImage' -o \
+            -name '*.dmg' -o \
+            -name '*.zip' -o \
+            -name '*-setup.exe' -o \
+            -name 'release_notes.md' \
+          \) -exec cp {} artifacts/ \;
+          ls -la artifacts/
+
+      - name: Generate source tarball
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="${{ needs.prepare.outputs.tag }}"
+          git archive --format=tar.gz \
+            --prefix="NereusSDR-${VERSION}/" \
+            "${TAG}" > "artifacts/NereusSDR-${VERSION}-source.tar.gz"
+
+      - name: Generate SHA256SUMS
+        working-directory: artifacts
+        run: |
+          # exclude release_notes.md from sums (not a release artifact)
+          sha256sum $(ls | grep -v '^release_notes.md$') > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Import GPG key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          KEY_FP=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/ {print $10; exit}')
+          echo "${KEY_FP}:6:" | gpg --import-ownertrust
+          gpg --list-secret-keys
+
+      - name: Sign artifacts
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        working-directory: artifacts
+        run: |
+          for f in *.AppImage *.dmg *.zip *.exe *.tar.gz SHA256SUMS.txt; do
+            [ -f "$f" ] || continue
+            gpg --batch --yes --pinentry-mode loopback \
+              --passphrase "$GPG_PASSPHRASE" \
+              --detach-sign --armor "$f"
+          done
+          ls -la
+
+      - name: Create draft GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="${{ needs.prepare.outputs.tag }}"
+          PRERELEASE_FLAG=""
+          if [[ "${{ needs.prepare.outputs.is_prerelease }}" == "true" ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          # Delete existing draft for this tag if rerunning
+          gh release delete "$TAG" --yes --cleanup-tag=false 2>/dev/null || true
+          gh release create "$TAG" \
+            --title "NereusSDR ${VERSION}" \
+            --notes-file artifacts/release_notes.md \
+            --draft \
+            $PRERELEASE_FLAG \
+            artifacts/*.AppImage \
+            artifacts/*.dmg \
+            artifacts/*.zip \
+            artifacts/*-setup.exe \
+            artifacts/*.tar.gz \
+            artifacts/SHA256SUMS.txt \
+            artifacts/*.asc
+
+      - name: Print release URL
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          URL=$(gh release view "${{ needs.prepare.outputs.tag }}" --json url -q .url)
+          echo "Draft release: $URL"
+          echo "## Draft release" >> "$GITHUB_STEP_SUMMARY"
+          echo "$URL" >> "$GITHUB_STEP_SUMMARY"
