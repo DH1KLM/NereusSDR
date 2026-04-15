@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixes
+- **P1 VFO frequency encoding (Phase 3G-11)** — `P1RadioConnection::composeCcBankRxFreq`
+  and `composeCcBankTxFreq` were pre-converting Hz to an NCO phase word
+  (`freqHz * 2^32 / 122.88e6`) before packing C1..C4. Protocol 1 firmware
+  expects raw Hz big-endian; only Protocol 2 uses phase words. Symptom on
+  ANAN-10E: aliased waterfall and VFO that did not track the dial,
+  reproduced in alpha tester pcap4 (2026-04-15) with 319 consecutive
+  `C0=0x04` frames pinned at phase word `0x080D5555`. Fix aligns with
+  Thetis `NetworkIO.cs:215-223` (USB branch sends raw Hz) and
+  `networkproto1.c:476-494` (splats `prn->{tx,rx}[0].frequency` into
+  C1..C4 with no conversion). Pre-existing `tst_p1_wire_format` assertions
+  had been asserting raw Hz all along but the opt-in test suite was not
+  running in CI. Verified on live ANAN-10E 2026-04-15.
+
+### Docs
+- **`docs/architecture/radio-abstraction.md`** — P1 and P2 frequency encoding
+  descriptions were inverted (claimed P1 = phase word, P2 = raw Hz). This
+  was almost certainly what misled the P1 implementation. Corrected the
+  §5 (P1) and §6 (P2) interface comments, the P1 vs P2 comparison table,
+  the P1 C&C register map, and replaced the "Frequency Phase Word
+  Calculation" subsection with a "Frequency Encoding (Raw Hz)" section
+  citing Thetis source.
+
+
 ## [0.1.4] - 2026-04-14
 
 Bug-fix release. Improves Hermes (Protocol 1) startup reliability and

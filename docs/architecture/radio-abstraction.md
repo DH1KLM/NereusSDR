@@ -579,8 +579,12 @@ private:
     void updateCandCRegister(int address, const QByteArray& data);
     QByteArray getCandCBytes(int address) const;
 
-    // Frequency encoding: phase_word = freq_hz * 2^32 / 122880000
-    static quint32 frequencyToPhaseWord(quint64 frequencyHz);
+    // P1 encodes RX/TX VFO frequency as raw Hz, big-endian, in C1..C4.
+    // Source: Thetis NetworkIO.cs:215-223 (USB branch passes f_freq raw) and
+    // networkproto1.c:476-494 (case 1/2 splat prn->{tx,rx}[0].frequency into
+    // C1..C4 with no conversion). Phase-word encoding lives on the P2 path,
+    // NOT P1 — see §6 below. A P1 frequencyToPhaseWord() helper was removed
+    // in Phase 3G-11 after it was found to mistune ANAN-10E in the field.
 
     // --- Protocol State ---
     QUdpSocket* m_socket{nullptr};
@@ -693,7 +697,12 @@ private:
     // Dispatch incoming datagrams by source port.
     void processDataPacket(const QByteArray& data, quint16 sourcePort);
 
-    // P2 encodes frequency directly in Hz (no phase word conversion).
+    // P2 encodes frequency as a 32-bit NCO phase word, big-endian.
+    //   phase_word = freq_hz * 2^32 / 122880000
+    // Source: Thetis NetworkIO.cs:220-223 (ETH branch calls Freq2PhaseWord)
+    // and P2RadioConnection.cpp high-priority packet builder (C0 general
+    // byte 37 bit 3 tells firmware C1..C4 are phase words). Contrast with
+    // P1 in §5, which uses raw Hz.
     static QByteArray encodeFrequency(quint64 frequencyHz);
 
     // --- Sockets ---
@@ -732,7 +741,7 @@ Confirmed by pcap analysis and Thetis ChannelMaster/network.c source.
 
 | Aspect | Protocol 1 | Protocol 2 |
 |--------|-----------|-----------|
-| Frequency encoding | Phase word: `freq * 2^32 / 122880000` | Direct Hz (32-bit integer) |
+| Frequency encoding | Raw Hz, 32-bit big-endian | Phase word: `freq * 2^32 / 122880000`, 32-bit big-endian |
 | Control transport | C&C bytes embedded in data frames | Dedicated UDP command packets to ports 1024-1027 |
 | Data transport | Single UDP stream, multiplexed | Per-DDC independent UDP streams (ports 1035-1041) |
 | Acknowledgment | None (fire-and-forget) | Status feedback on port 1025 |
@@ -967,23 +976,24 @@ C4[7:0]: Board-specific config
 
 **C0 = 0x01: TX NCO Frequency**
 ```
-C1-C4: 32-bit phase word for TX NCO
-  phase_word = (uint32_t)(freq_hz * 4294967296.0 / 122880000.0)
+C1-C4: 32-bit TX frequency in Hz, big-endian (raw, NOT a phase word)
+Source: networkproto1.c:476-482 case 1 splats prn->tx[0].frequency.
 ```
 
 **C0 = 0x02: RX1 NCO Frequency**
 ```
-C1-C4: 32-bit phase word for RX1 NCO
+C1-C4: 32-bit RX1 frequency in Hz, big-endian
+Source: networkproto1.c:484-494 case 2 splats prn->rx[0].frequency.
 ```
 
 **C0 = 0x03: RX2 NCO Frequency**
 ```
-C1-C4: 32-bit phase word for RX2 NCO
+C1-C4: 32-bit RX2 frequency in Hz, big-endian
 ```
 
 **C0 = 0x04 through 0x08: RX3-RX7 NCO Frequencies**
 ```
-C1-C4: 32-bit phase word for RX3-RX7 NCOs respectively
+C1-C4: 32-bit RXn frequency in Hz, big-endian, per receiver
 ```
 
 **C0 = 0x09: TX Drive and Mic Boost**
@@ -1008,27 +1018,35 @@ C2[4:0]: ADC2 attenuator (0-31 dB, Angelia/Orion)
 C3-C4:   Board-specific (Alex filter/antenna on Orion)
 ```
 
-### Frequency Phase Word Calculation
+### Frequency Encoding (Raw Hz)
 
-P1 uses a numerically controlled oscillator (NCO). Frequency is encoded as a
-32-bit phase accumulator increment:
+**Earlier revisions of this section described a host-side phase-word
+calculation for P1. That was wrong and caused a real bug — see Phase 3G-11
+in `MASTER-PLAN.md` and the commit on `fix/p1-freq-encoding`.**
+
+P1 firmware does its own NCO phase-word conversion internally from a 32-bit
+Hz integer. The host just writes the frequency in Hz, big-endian, into
+C1..C4 of the appropriate C&C bank:
 
 ```
-phase_word = (uint32_t)((double)freq_hz * 2^32 / clock_freq)
-
-Where clock_freq = 122880000 Hz (122.88 MHz master clock)
+C1 = (freq_hz >> 24) & 0xFF
+C2 = (freq_hz >> 16) & 0xFF
+C3 = (freq_hz >>  8) & 0xFF
+C4 =  freq_hz        & 0xFF
 ```
 
-```cpp
-quint32 P1RadioConnection::frequencyToPhaseWord(quint64 frequencyHz) {
-    // Apply frequency correction factor
-    double correctedFreq = static_cast<double>(frequencyHz) * m_frequencyCorrection;
-    double phaseWord = correctedFreq * 4294967296.0 / 122880000.0;
-    return static_cast<quint32>(phaseWord);
-}
-```
+Source chain:
+- Thetis `NetworkIO.cs:215-223` `VFOfreq()` — the `RadioProtocol.USB` branch
+  (which maps to Protocol 1 per `cmaster.cs:520` "case RadioProtocol.USB:
+  //p1") calls `SetVFOfreq(id, f_freq, tx)` with raw Hz.
+- Native `ChannelMaster/networkproto1.c:476-494` — case 1 (TX VFO) and
+  case 2 (RX1 DDC0) shift `prn->{tx,rx}[0].frequency` directly into C1..C4
+  with no conversion.
 
-Example: 14.200 MHz = `14200000 * 4294967296 / 122880000 = 496,741,916` = `0x1D9CC31C`
+Phase-word encoding is a **Protocol 2** concept (see §6 above). Do not apply
+it on the P1 send path.
+
+Example: 14.200 MHz → C1..C4 = `00 D8 AD 40`  (= `14200000` decimal)
 
 ### C&C Rotation
 
