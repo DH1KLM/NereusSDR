@@ -534,6 +534,7 @@ void WaterfallDefaultsPage::loadFromRenderer()
     QSignalBlocker b7(m_opacitySlider);
     QSignalBlocker b8(m_colorSchemeCombo);
     QSignalBlocker b9(m_wfAveragingCombo);
+    QSignalBlocker b9b(m_wfAvgTimeSpin);
     QSignalBlocker b10(m_showRxFilterToggle);
     QSignalBlocker b11(m_showTxFilterToggle);
     QSignalBlocker b12(m_showRxZeroLineToggle);
@@ -550,6 +551,11 @@ void WaterfallDefaultsPage::loadFromRenderer()
     m_opacitySlider->setValue(sw->wfOpacity());
     m_colorSchemeCombo->setCurrentIndex(static_cast<int>(sw->wfColorScheme()));
     m_wfAveragingCombo->setCurrentIndex(static_cast<int>(sw->wfAverageMode()));
+    {
+        // Reverse the alpha→ms formula: ms = (1.0 - alpha) * 5000
+        int ms = static_cast<int>((1.0f - sw->wfAverageAlpha()) * 5000.0f);
+        m_wfAvgTimeSpin->setValue(qBound(10, ms, 5000));
+    }
     m_showRxFilterToggle->setChecked(sw->showRxFilterOnWaterfall());
     m_showTxFilterToggle->setChecked(sw->showTxFilterOnRxWaterfall());
     m_showRxZeroLineToggle->setChecked(sw->showRxZeroLineOnWaterfall());
@@ -710,6 +716,24 @@ void WaterfallDefaultsPage::buildUI()
         }
     });
     dispForm->addRow(QStringLiteral("WF Averaging:"), m_wfAveragingCombo);
+
+    m_wfAvgTimeSpin = new QSpinBox(dispGroup);
+    m_wfAvgTimeSpin->setRange(10, 5000);
+    m_wfAvgTimeSpin->setSingleStep(10);
+    m_wfAvgTimeSpin->setSuffix(QStringLiteral(" ms"));
+    m_wfAvgTimeSpin->setValue(100);
+    m_wfAvgTimeSpin->setToolTip(QStringLiteral(
+        "Duration of the waterfall averaging window in milliseconds. "
+        "Longer = heavier smoothing, slower response to signal changes. "
+        "Independent of the spectrum trace averaging time."));
+    connect(m_wfAvgTimeSpin, qOverload<int>(&QSpinBox::valueChanged),
+            this, [this](int ms) {
+        const float a = qBound(0.05f, 1.0f - (ms / 5000.0f), 0.95f);
+        if (auto* w = model() ? model()->spectrumWidget() : nullptr) {
+            w->setWfAverageAlpha(a);
+        }
+    });
+    dispForm->addRow(QStringLiteral("WF Avg Time:"), m_wfAvgTimeSpin);
 
     contentLayout()->addWidget(dispGroup);
 

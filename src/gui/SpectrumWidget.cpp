@@ -281,6 +281,10 @@ void SpectrumWidget::loadSettings()
     // Phase 3G-8 commit 4: waterfall renderer state.
     m_wfAgcEnabled = s.value(settingsKey(QStringLiteral("DisplayWfAgc"), m_panIndex),
                              QStringLiteral("False")).toString() == QStringLiteral("True");
+    {
+        const QVariant wfAlphaV = s.value(settingsKey(QStringLiteral("DisplayWfAverageAlpha"), m_panIndex));
+        if (wfAlphaV.isValid()) { m_wfAverageAlpha = qBound(0.01f, wfAlphaV.toFloat(), 1.0f); }
+    }
     m_wfReverseScroll = s.value(settingsKey(QStringLiteral("DisplayWfReverseScroll"), m_panIndex),
                                 QStringLiteral("False")).toString() == QStringLiteral("True");
     m_wfOpacity          = readInt(QStringLiteral("DisplayWfOpacity"), 100);
@@ -374,6 +378,7 @@ void SpectrumWidget::saveSettings()
     // Phase 3G-8 commit 4: waterfall renderer state.
     s.setValue(settingsKey(QStringLiteral("DisplayWfAgc"), m_panIndex),
               m_wfAgcEnabled ? QStringLiteral("True") : QStringLiteral("False"));
+    s.setValue(settingsKey(QStringLiteral("DisplayWfAverageAlpha"), m_panIndex), m_wfAverageAlpha);
     s.setValue(settingsKey(QStringLiteral("DisplayWfReverseScroll"), m_panIndex),
               m_wfReverseScroll ? QStringLiteral("True") : QStringLiteral("False"));
     writeInt(QStringLiteral("DisplayWfOpacity"), m_wfOpacity);
@@ -657,6 +662,12 @@ void SpectrumWidget::setWfAgcEnabled(bool on)
 void SpectrumWidget::setClarityActive(bool on)
 {
     m_clarityActive = on;
+}
+
+void SpectrumWidget::setWfAverageAlpha(float alpha)
+{
+    m_wfAverageAlpha = qBound(0.01f, alpha, 1.0f);
+    scheduleSettingsSave();
 }
 
 void SpectrumWidget::setWfReverseScroll(bool on)
@@ -1449,7 +1460,7 @@ void SpectrumWidget::pushWaterfallRow(const QVector<float>& bins)
         if (m_wfSmoothedBins.size() != bins.size()) {
             m_wfSmoothedBins = bins;
         } else {
-            const float a = qBound(0.0f, m_averageAlpha, 1.0f);
+            const float a = qBound(0.0f, m_wfAverageAlpha, 1.0f);
             for (int i = 0; i < bins.size(); ++i) {
                 m_wfSmoothedBins[i] = a * bins[i]
                                     + (1.0f - a) * m_wfSmoothedBins[i];

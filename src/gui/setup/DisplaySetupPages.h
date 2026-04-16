@@ -83,6 +83,7 @@ private:
     QSlider*   m_opacitySlider{nullptr};
     QComboBox* m_colorSchemeCombo{nullptr};  // 7 schemes
     QComboBox* m_wfAveragingCombo{nullptr};  // W16
+    QSpinBox*  m_wfAvgTimeSpin{nullptr};
 
     // Section: Overlays
     QCheckBox* m_showRxFilterToggle{nullptr};
