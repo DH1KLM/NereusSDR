@@ -326,8 +326,8 @@ jobs:
       #     step (or an env-var threading through hal-installer.sh) will
       #     be needed before notarization can succeed end-to-end.
       # Until both are addressed, the Notarize step is expected to fail
-      # on real submissions; the Sign HAL plugin / Build signed .pkg
-      # steps do their job standalone and the .pkg upload still lands.
+      # on real submissions; the Sign HAL plugin / Build .pkg steps do
+      # their job standalone and the .pkg upload still lands.
       - name: Build HAL plugin
         run: |
           cmake -B build-hal -S hal-plugin -DCMAKE_BUILD_TYPE=RelWithDebInfo
