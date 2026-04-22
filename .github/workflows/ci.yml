@@ -97,6 +97,49 @@ jobs:
         if: runner.os == 'Linux'
         run: python3 scripts/compliance-inventory.py --fail-on-unclassified
 
+      # ------------------------------------------------------------------
+      # Inline author-tag preservation (added 2026-04-21 after DH1KLM drop)
+      # ------------------------------------------------------------------
+      - name: Clone Thetis + mi0bot-Thetis upstream for tag check
+        if: runner.os == 'Linux'
+        run: |
+          git clone --depth=1 https://github.com/ramdor/Thetis.git ../Thetis
+          git clone --depth=1 https://github.com/mi0bot/OpenHPSDR-Thetis.git ../mi0bot-Thetis
+
+      - name: Corpus drift — upstream author tags match committed corpus
+        # Fails if upstream Thetis (ramdor or mi0bot fork) contains
+        # contributor tags that the committed
+        # docs/attribution/thetis-author-tags.json does not yet list.
+        # Forces corpus refresh before any port can cite a new region.
+        if: runner.os == 'Linux'
+        env:
+          NEREUS_THETIS_DIR: ${{ github.workspace }}/../Thetis
+          NEREUS_MI0BOT_DIR: ${{ github.workspace }}/../mi0bot-Thetis
+        run: python3 scripts/discover-thetis-author-tags.py --drift
+
+      - name: Verify inline author-tag preservation in ported code
+        # For every `// From Thetis X:N [@sha]` cite, opens upstream at
+        # line N and requires any author tag in ±5 source lines to
+        # appear within ±10 port lines. This is the safety net that
+        # would have caught the 2026-04-21 DH1KLM drop at PR time.
+        if: runner.os == 'Linux'
+        env:
+          NEREUS_THETIS_DIR: ${{ github.workspace }}/../Thetis
+          NEREUS_MI0BOT_DIR: ${{ github.workspace }}/../mi0bot-Thetis
+        run: python3 scripts/verify-inline-tag-preservation.py
+
+      - name: Contributor indexes are up to date with corpus
+        # Regenerates docs/attribution/thetis-{contributor,inline-mods}-
+        # index.md from the corpus JSON and fails the PR if the
+        # committed indexes drift. Ensures the two human-readable
+        # audit docs stay in lockstep with the mechanical corpus, and
+        # by extension with upstream Thetis source.
+        if: runner.os == 'Linux'
+        env:
+          NEREUS_THETIS_DIR: ${{ github.workspace }}/../Thetis
+          NEREUS_MI0BOT_DIR: ${{ github.workspace }}/../mi0bot-Thetis
+        run: python3 scripts/generate-contributor-indexes.py --check
+
       - name: WDSP header census drift detector
         # Re-runs the third_party/wdsp/src/ classification and fails if
         # the counts drift from WDSP-PROVENANCE.md's documented split
