@@ -547,6 +547,16 @@ jobs:
             Write-Error "libfftw3f-3.dll missing from third_party\fftw3\bin\ — Windows artifact would ship broken"
             exit 1
           }
+          # deepfilter.dll — Rust DFNR runtime (windeployqt only handles Qt DLLs;
+          # this non-Qt dependency must be staged by hand or the .exe fails to
+          # start with "deepfilter.dll was not found").
+          $dfnrDll = "third_party\deepfilter\lib\windows-x86_64\deepfilter.dll"
+          if (Test-Path $dfnrDll) {
+            Copy-Item $dfnrDll deploy\
+          } else {
+            Write-Error "deepfilter.dll missing from third_party\deepfilter\lib\windows-x86_64\ — Windows artifact would ship broken (DFNR will crash at load)"
+            exit 1
+          }
           # Copy third-party license notices + both root license files
           # (LICENSE and LICENSE-DUAL-LICENSING) into the portable deploy
           # tree so both the ZIP and the NSIS installer pick them up.
