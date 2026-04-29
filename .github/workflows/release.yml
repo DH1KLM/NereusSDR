@@ -301,6 +301,44 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # Import Apple Developer ID certs into a temporary keychain so
+      # codesign / productbuild can find them. Gated on the secret being
+      # present so dev builds without secrets still complete (they fall
+      # back to ad-hoc codesign in the "Codesign app" step below).
+      - name: Import Apple certs
+        if: env.HAS_APPLE_DEVELOPER_ID == 'true'
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_P12_PASSWORD: ${{ secrets.APPLE_CERT_P12_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 24)
+          P12_PATH="$RUNNER_TEMP/certs.p12"
+
+          echo -n "$APPLE_CERT_P12_BASE64" | base64 --decode > "$P12_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$P12_PATH" \
+            -P "$APPLE_CERT_P12_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+
+          # Add temp keychain to the search list so codesign finds the certs
+          security list-keychains -d user -s "$KEYCHAIN_PATH" \
+            $(security list-keychains -d user | tr -d '"')
+
+          # Allow codesign / productbuild to use the keys without prompts
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign:,productbuild: \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Verify both identities are visible
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+          rm "$P12_PATH"
+
       - name: Set up DeepFilterNet3 library
         run: bash setup-deepfilter.sh
 
@@ -359,32 +397,21 @@ jobs:
           mkdir -p build/NereusSDR.app/Contents/Resources/models/dfnet3
           cp third_party/deepfilter/models/DeepFilterNet3_onnx.tar.gz build/NereusSDR.app/Contents/Resources/models/dfnet3/
 
-      - name: Ad-hoc codesign
+      # Sign the .app bundle. With APPLE_DEVELOPER_ID set we use Developer
+      # ID + hardened runtime + entitlements (required for notarization).
+      # Without secrets we fall back to ad-hoc so dev builds still work.
+      - name: Codesign app
         run: |
-          codesign --force --deep --sign - build/NereusSDR.app
+          if [ "$HAS_APPLE_DEVELOPER_ID" = "true" ]; then
+            codesign --force --deep --options runtime --timestamp \
+              --entitlements packaging/macos/app-entitlements.plist \
+              --sign "${{ secrets.APPLE_DEVELOPER_ID }}" \
+              build/NereusSDR.app
+          else
+            codesign --force --deep --sign - build/NereusSDR.app
+          fi
           codesign --verify --verbose=2 build/NereusSDR.app
 
-      # ── Sub-Phase 5 Task 5.4: HAL plugin build + sign + .pkg + notarize ──
-      # The HAL plugin build and the .pkg build via hal-installer.sh run
-      # unconditionally so alpha / dev release cuts without Apple certs
-      # still produce a working (unsigned) .pkg artifact. The Developer ID
-      # sign, notarize, and staple steps are gated on APPLE_DEVELOPER_ID
-      # being populated.
-      #
-      # Known limitations (tracked for a Sub-Phase 5.5 follow-up):
-      #   * The main app currently gets ad-hoc codesign above, not
-      #     Developer ID. Apple's notarytool requires every component
-      #     inside a submitted .pkg to carry a Developer ID signature,
-      #     so notarization will reject the .pkg until the app's
-      #     codesign step is upgraded to Developer ID when secrets are
-      #     present.
-      #   * The .pkg itself is produced by productbuild without --sign.
-      #     A Developer ID Installer certificate and an extra productsign
-      #     step (or an env-var threading through hal-installer.sh) will
-      #     be needed before notarization can succeed end-to-end.
-      # Until both are addressed, the Notarize step is expected to fail
-      # on real submissions; the Sign HAL plugin / Build .pkg steps do
-      # their job standalone and the .pkg upload still lands.
       - name: Build HAL plugin
         run: |
           cmake -B build-hal -S hal-plugin -DCMAKE_BUILD_TYPE=RelWithDebInfo
@@ -394,13 +421,16 @@ jobs:
         if: env.HAS_APPLE_DEVELOPER_ID == 'true'
         run: |
           codesign --force --options runtime --timestamp \
-            --sign "Developer ID Application: ${{ secrets.APPLE_DEVELOPER_ID }}" \
+            --entitlements packaging/macos/hal-entitlements.plist \
+            --sign "${{ secrets.APPLE_DEVELOPER_ID }}" \
             build-hal/NereusSDRVAX.driver
 
       - name: Build .pkg
+        env:
+          APPLE_INSTALLER_ID: ${{ secrets.APPLE_INSTALLER_ID }}
         run: bash packaging/macos/hal-installer.sh
 
-      - name: Notarize
+      - name: Notarize .pkg
         if: env.HAS_APPLE_DEVELOPER_ID == 'true'
         run: |
           xcrun notarytool submit \
@@ -410,7 +440,7 @@ jobs:
             --password "${{ secrets.APPLE_APP_PASSWORD }}" \
             --wait
 
-      - name: Staple
+      - name: Staple .pkg
         if: env.HAS_APPLE_DEVELOPER_ID == 'true'
         run: |
           xcrun stapler staple \
@@ -431,17 +461,30 @@ jobs:
           || true
           ls -la NereusSDR-*.dmg
 
-      # NOTE: The .pkg is uploaded as a workflow artifact only — NOT attached
-      # to the GitHub Release. Release attachment is deferred until the two
-      # cascading items land:
-      #   1. Main app codesign upgraded from ad-hoc to Developer ID (required
-      #      for notarization to accept the .pkg).
-      #   2. hal-installer.sh wired for productbuild --sign via
-      #      Developer ID Installer certificate.
-      # Until both are in place, the .pkg is a build-verification artifact
-      # for local smoke-testing, not a distributable installer. The
-      # sign-and-publish job at the bottom of this workflow intentionally
-      # excludes *.pkg from its find glob.
+      - name: Codesign DMG
+        if: env.HAS_APPLE_DEVELOPER_ID == 'true'
+        run: |
+          DMG_PATH=$(ls NereusSDR-*.dmg | head -1)
+          codesign --force --timestamp \
+            --sign "${{ secrets.APPLE_DEVELOPER_ID }}" \
+            "$DMG_PATH"
+
+      - name: Notarize DMG
+        if: env.HAS_APPLE_DEVELOPER_ID == 'true'
+        run: |
+          DMG_PATH=$(ls NereusSDR-*.dmg | head -1)
+          xcrun notarytool submit "$DMG_PATH" \
+            --apple-id "${{ secrets.APPLE_ID }}" \
+            --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+            --password "${{ secrets.APPLE_APP_PASSWORD }}" \
+            --wait
+
+      - name: Staple DMG
+        if: env.HAS_APPLE_DEVELOPER_ID == 'true'
+        run: |
+          DMG_PATH=$(ls NereusSDR-*.dmg | head -1)
+          xcrun stapler staple "$DMG_PATH"
+
       - name: Upload .pkg artifact
         uses: actions/upload-artifact@v4
         with:
@@ -641,6 +684,7 @@ jobs:
           find downloaded -type f \( \
             -name '*.AppImage' -o \
             -name '*.dmg' -o \
+            -name '*.pkg' -o \
             -name '*.zip' -o \
             -name '*-setup.exe' -o \
             -name 'release_notes.md' \
@@ -689,7 +733,7 @@ jobs:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         working-directory: artifacts
         run: |
-          for f in *.AppImage *.dmg *.zip *.exe *.tar.gz SHA256SUMS.txt; do
+          for f in *.AppImage *.dmg *.pkg *.zip *.exe *.tar.gz SHA256SUMS.txt; do
             [ -f "$f" ] || continue
             gpg --batch --yes --pinentry-mode loopback \
               --passphrase "$GPG_PASSPHRASE" \
@@ -716,6 +760,7 @@ jobs:
             $PRERELEASE_FLAG \
             artifacts/*.AppImage \
             artifacts/*.dmg \
+            artifacts/*.pkg \
             artifacts/*.zip \
             artifacts/*-setup.exe \
             artifacts/*.tar.gz \
