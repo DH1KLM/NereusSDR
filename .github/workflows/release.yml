@@ -134,17 +134,18 @@ jobs:
           sudo apt-get install -y qt6-base-dev qt6-multimedia-dev \
             qt6-base-private-dev qt6-shadertools-dev qt6-svg-dev
 
-      - name: Install Qt 6.7 via aqtinstall (x86_64)
+      - name: Install Qt 6.8 via aqtinstall (x86_64)
         if: matrix.use_aqt == true
         run: |
-          pip3 install 'aqtinstall<3.3'
-          aqt install-qt linux desktop 6.7.3 linux_gcc_64 \
-            -m qtmultimedia qtshadertools qtsvg \
+          pip3 install aqtinstall
+          # Qt 6.8+ folds qtsvg/qttools/qttranslations into qtbase; not listable as -m modules.
+          aqt install-qt linux desktop 6.8.3 linux_gcc_64 \
+            -m qtmultimedia qtshadertools \
             --outputdir ${{ github.workspace }}/Qt
-          echo "Qt6_DIR=${{ github.workspace }}/Qt/6.7.3/gcc_64/lib/cmake/Qt6" >> $GITHUB_ENV
-          echo "CMAKE_PREFIX_PATH=${{ github.workspace }}/Qt/6.7.3/gcc_64" >> $GITHUB_ENV
-          echo "PATH=${{ github.workspace }}/Qt/6.7.3/gcc_64/bin:$PATH" >> $GITHUB_ENV
-          echo "LD_LIBRARY_PATH=${{ github.workspace }}/Qt/6.7.3/gcc_64/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "Qt6_DIR=${{ github.workspace }}/Qt/6.8.3/gcc_64/lib/cmake/Qt6" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=${{ github.workspace }}/Qt/6.8.3/gcc_64" >> $GITHUB_ENV
+          echo "PATH=${{ github.workspace }}/Qt/6.8.3/gcc_64/bin:$PATH" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/Qt/6.8.3/gcc_64/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -165,7 +166,7 @@ jobs:
           ccache --max-size=2G
           CMAKE_EXTRA=""
           if [ "${{ matrix.use_aqt }}" = "true" ]; then
-            CMAKE_EXTRA="-DCMAKE_PREFIX_PATH=${{ github.workspace }}/Qt/6.7.3/gcc_64"
+            CMAKE_EXTRA="-DCMAKE_PREFIX_PATH=${{ github.workspace }}/Qt/6.8.3/gcc_64"
           else
             # Ubuntu 24.04 ARM ships Qt 6.4.2; QRhiWidget requires 6.7+.
             # Mirror ci.yml linux-gcc: CPU-only spectrum on this runner.
@@ -220,7 +221,7 @@ jobs:
           EXTRA_QT_PLUGINS: multimedia
         run: |
           if [ "${{ matrix.use_aqt }}" = "true" ]; then
-            export QMAKE=${{ github.workspace }}/Qt/6.7.3/gcc_64/bin/qmake
+            export QMAKE=${{ github.workspace }}/Qt/6.8.3/gcc_64/bin/qmake
           else
             export QMAKE=$(which qmake6 2>/dev/null || which qmake)
           fi
@@ -513,12 +514,12 @@ jobs:
       - name: Install Qt6
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.7.*'
+          version: '6.8.*'
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2019_64'
-          modules: 'qtmultimedia qtserialport qtwebsockets qtshadertools qtsvg'
-          aqtversion: '<3.3'
+          # Qt 6.8+ folds qtsvg into qtbase; not listable as a separate module.
+          modules: 'qtmultimedia qtserialport qtwebsockets qtshadertools'
           cache: true
 
       - name: Install Ninja and NSIS
