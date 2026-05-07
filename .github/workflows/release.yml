@@ -554,14 +554,19 @@ jobs:
 
       - name: Create DMG
         run: |
+          # Background is paired @1x + @2x for Retina sharpness. create-dmg
+          # picks up the @2x sibling automatically when both files share the
+          # same basename in the same directory.
           create-dmg \
             --volname "NereusSDR" \
+            --volicon "resources/icons/NereusSDR.icns" \
+            --background "packaging/macos/dmg-background.png" \
             --window-pos 200 120 \
-            --window-size 600 400 \
-            --icon-size 100 \
-            --icon "NereusSDR.app" 150 110 \
+            --window-size 680 384 \
+            --icon-size 96 \
+            --icon "NereusSDR.app" 160 200 \
             --hide-extension "NereusSDR.app" \
-            --app-drop-link 450 110 \
+            --app-drop-link 540 200 \
             "NereusSDR-${{ needs.prepare.outputs.version }}-${{ matrix.dmg_suffix }}.dmg" \
             "build/NereusSDR.app" \
           || true
