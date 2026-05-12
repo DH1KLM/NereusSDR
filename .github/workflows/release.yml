@@ -303,11 +303,17 @@ jobs:
 
       - name: Install dependencies (arm64 native)
         if: matrix.arch == 'arm64'
-        run: brew install qt@6 ninja create-dmg fftw ccache
+        # autoconf/automake/libtool/wget required by third_party/rade
+        # vendored Opus (autotools + wget DRED model download). Not in
+        # default macOS runner image.
+        run: brew install qt@6 ninja create-dmg fftw ccache autoconf automake libtool wget
 
       - name: Install non-Qt brew packages (x86_64 cross-compile)
         if: matrix.arch == 'x86_64'
-        run: brew install ninja create-dmg ccache
+        # autoconf/automake/libtool/wget required by third_party/rade
+        # vendored Opus (autotools + wget DRED model download). Not in
+        # default macOS runner image.
+        run: brew install ninja create-dmg ccache autoconf automake libtool wget
 
       - name: Install Qt 6.8 for x86_64 macOS via aqtinstall
         if: matrix.arch == 'x86_64'
