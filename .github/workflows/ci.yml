@@ -197,7 +197,11 @@ jobs:
             qt6-shadertools-dev qt6-svg-dev \
             libgl1-mesa-dev libfftw3-dev \
             libasound2-dev libjack-jackd2-dev \
-            libpipewire-0.3-dev
+            libpipewire-0.3-dev \
+            xvfb libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-xinerama0 libxcb-xkb1
 
       # ------------------------------------------------------------------
       # macOS dependencies
@@ -353,9 +357,25 @@ jobs:
         # ctest exits 0 with a warning instead of erroring out because
         # there's no test list to run against.  Linux is the source-of-
         # truth gate for the test suite.
+        #
+        # QT_QPA_PLATFORM=offscreen: GitHub runners are headless so
+        # Qt widgets can't create native windows.  The offscreen
+        # platform plugin lets GUI-backed tests (QApplication +
+        # QWidget constructors) run without an X server.
+        # xvfb-run wraps the entire ctest invocation in a virtual
+        # X display for the handful of tests that probe QScreen /
+        # QGuiApplication directly (where the offscreen plugin
+        # alone is insufficient).
+        # ALSA_CONFIG_PATH=/dev/null + libasound2 has no audio
+        # device on the runner; tests that touch PortAudio must
+        # gracefully handle "no devices available" rather than
+        # asserting on a successful open.  tst_port_audio_bus is
+        # the one outstanding case; tracked as out-of-scope for
+        # this PR.
         run: |
           if [ "${{ runner.os }}" = "Linux" ]; then
-            ctest --output-on-failure
+            export QT_QPA_PLATFORM=offscreen
+            xvfb-run -a ctest --output-on-failure
           else
             ctest --output-on-failure --no-tests=ignore
           fi
