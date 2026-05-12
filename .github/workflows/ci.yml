@@ -289,11 +289,19 @@ jobs:
           # (matching release.yml) is a separate ticket; for now this
           # matches the historical behavior of Linux CI silently
           # falling back to the CPU path.
+          #
+          # 2026-05-12 (PR #238 review P1 #4): NEREUS_BUILD_TESTS=ON
+          # so the test suite actually compiles + runs in CI.  Prior
+          # configure left it off, the ctest step ran with
+          # --no-tests=ignore, and any drift in test sources (signal
+          # signatures, ctor sigs, factory-profile defaults) silently
+          # passed.  Now we build + run the whole test suite on Linux.
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DNEREUS_GPU_SPECTRUM=OFF
+            -DNEREUS_GPU_SPECTRUM=OFF \
+            -DNEREUS_BUILD_TESTS=ON
 
       - name: Configure (macOS)
         if: runner.os == 'macOS'
@@ -335,7 +343,22 @@ jobs:
       - name: Test
         working-directory: build
         shell: bash
-        run: ctest --output-on-failure --no-tests=ignore
+        # 2026-05-12 (PR #238 review P1 #4): drop --no-tests=ignore so
+        # a configure that produces zero tests fails loud.  Linux is
+        # configured with NEREUS_BUILD_TESTS=ON above; macOS + Windows
+        # still configure with tests OFF (the test suite uses Linux-
+        # specific PortAudio / Qt 6.4 fakes that haven't been ported
+        # to the macOS / mingw paths yet — separate scope).  So
+        # macOS + Windows still pass through with zero tests for now;
+        # ctest exits 0 with a warning instead of erroring out because
+        # there's no test list to run against.  Linux is the source-of-
+        # truth gate for the test suite.
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            ctest --output-on-failure
+          else
+            ctest --output-on-failure --no-tests=ignore
+          fi
 
       # ------------------------------------------------------------------
       # PR artifact upload
