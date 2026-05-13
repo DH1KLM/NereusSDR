@@ -187,14 +187,17 @@ jobs:
       # ------------------------------------------------------------------
       # Linux dependencies
       # ------------------------------------------------------------------
-      - name: Install dependencies (Linux)
+      - name: Install system dependencies (Linux)
+        # System libs only. Qt itself comes from install-qt-action below
+        # so we match the release.yml + Windows CI versions (6.8.*) and
+        # get QRhiWidget on Linux too. Apt qt6-* on ubuntu-24.04 was Qt
+        # 6.4.2, which is too old for QRhiWidget and forced
+        # -DNEREUS_GPU_SPECTRUM=OFF on Linux.
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             cmake ninja-build pkg-config g++ \
-            qt6-base-dev qt6-base-private-dev qt6-multimedia-dev \
-            qt6-shadertools-dev qt6-svg-dev \
             libgl1-mesa-dev libfftw3-dev \
             libasound2-dev libjack-jackd2-dev \
             libpipewire-0.3-dev \
@@ -202,6 +205,18 @@ jobs:
             libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
             libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install Qt (Linux)
+        if: runner.os == 'Linux'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          # Qt 6.8+ folds qtsvg into qtbase; not listable as a module.
+          modules: 'qtmultimedia qtshadertools'
+          cache: true
 
       # ------------------------------------------------------------------
       # macOS dependencies
@@ -285,26 +300,22 @@ jobs:
       - name: Configure (Linux)
         if: runner.os == 'Linux'
         run: |
-          # Linux CI uses Ubuntu's system Qt 6 via apt (qt6-base-dev),
-          # which on ubuntu-24.04 is Qt 6.4.2 — too old for QRhiWidget
-          # (requires 6.7+). GPU spectrum is explicitly disabled here
-          # so CMake's new FATAL_ERROR path does not trip. Upgrading
-          # the Linux CI runner to install-qt-action-managed Qt 6.7+
-          # (matching release.yml) is a separate ticket; for now this
-          # matches the historical behavior of Linux CI silently
-          # falling back to the CPU path.
-          #
           # 2026-05-12 (PR #238 review P1 #4): NEREUS_BUILD_TESTS=ON
           # so the test suite actually compiles + runs in CI.  Prior
           # configure left it off, the ctest step ran with
           # --no-tests=ignore, and any drift in test sources (signal
           # signatures, ctor sigs, factory-profile defaults) silently
           # passed.  Now we build + run the whole test suite on Linux.
+          #
+          # 2026-05-13: Qt now comes from install-qt-action (6.8.*)
+          # instead of apt qt6-* (which was 6.4.2 on ubuntu-24.04).
+          # That makes QRhiWidget available on Linux CI so we no
+          # longer need -DNEREUS_GPU_SPECTRUM=OFF.  Matches release.yml
+          # x86_64 path and Windows CI.
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DNEREUS_GPU_SPECTRUM=OFF \
             -DNEREUS_BUILD_TESTS=ON
 
       - name: Configure (macOS)
