@@ -202,9 +202,37 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Linux is sharded into 4 parallel runners (shard 0..3) so the
+        # 451-test build splits ~113 tests per runner. Each shard
+        # independently builds the main app + its slice of tests + runs
+        # them. Wall-clock to all-green matches macOS / Windows because
+        # all four shards run concurrently.
+        #
+        # macOS + Windows stay single-job: they don't build the test
+        # suite (the fakes are Linux-specific) so a single runner is
+        # already at parity with each Linux shard.
+        #
+        # `shard` / `shards` only apply on Linux entries; macOS / Windows
+        # leave them unset so CMake's NEREUS_TEST_SHARDS defaults to 0
+        # (no sharding) — but they don't build tests anyway, so the
+        # variable is moot for them.
         include:
           - os: ubuntu-24.04
-            name: Linux x64
+            name: Linux x64 (1/4)
+            shard: 0
+            shards: 4
+          - os: ubuntu-24.04
+            name: Linux x64 (2/4)
+            shard: 1
+            shards: 4
+          - os: ubuntu-24.04
+            name: Linux x64 (3/4)
+            shard: 2
+            shards: 4
+          - os: ubuntu-24.04
+            name: Linux x64 (4/4)
+            shard: 3
+            shards: 4
           - os: macos-15
             name: macOS Apple Silicon
           - os: windows-latest
@@ -342,8 +370,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ccache-${{ runner.os }}-${{ github.sha }}
+          # Per-shard cache key on Linux so the 4 parallel shards don't
+          # race on the same write key (only one save per key wins per
+          # run).  matrix.shard is empty on macOS, so the key collapses
+          # to the original `ccache-macOS-<sha>` form there.  Restore
+          # falls through: shard-specific → any-shard-this-OS → any
+          # prior cache for this OS.
+          key: ccache-${{ runner.os }}-shard${{ matrix.shard }}-${{ github.sha }}
           restore-keys: |
+            ccache-${{ runner.os }}-shard${{ matrix.shard }}-
             ccache-${{ runner.os }}-
 
       - name: Configure ccache
@@ -392,6 +427,11 @@ jobs:
         # graphs; with 451 test executables this saves the bulk of the
         # build wall-clock. _INIT suffix means it composes with any
         # toolchain-provided defaults instead of clobbering them.
+        #
+        # 2026-05-13 (sharding): NEREUS_TEST_SHARDS / NEREUS_TEST_SHARD
+        # tell tests/CMakeLists.txt's nereus_add_test() to register
+        # only the slice of tests whose name-MD5 modulo SHARDS matches
+        # SHARD.  See tests/CMakeLists.txt for the dispatch rules.
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -400,7 +440,9 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS_INIT=-fuse-ld=mold \
             -DCMAKE_SHARED_LINKER_FLAGS_INIT=-fuse-ld=mold \
             -DCMAKE_MODULE_LINKER_FLAGS_INIT=-fuse-ld=mold \
-            -DNEREUS_BUILD_TESTS=ON
+            -DNEREUS_BUILD_TESTS=ON \
+            -DNEREUS_TEST_SHARDS=${{ matrix.shards }} \
+            -DNEREUS_TEST_SHARD=${{ matrix.shard }}
 
       - name: Configure (macOS)
         if: runner.os == 'macOS'
@@ -478,8 +520,12 @@ jobs:
       # ------------------------------------------------------------------
       # PR artifact upload
       # ------------------------------------------------------------------
+      # Linux is sharded — every shard rebuilds the same main app, so
+      # only shard 0 uploads the artifact to keep the PR's artifact
+      # list clean.  macOS / Windows always upload (matrix.shard is
+      # empty for them, treated as 0 by the comparison).
       - name: Locate built binary
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && (matrix.shard == 0 || matrix.shard == '')
         id: locate
         shell: bash
         run: |
@@ -490,10 +536,12 @@ jobs:
           esac
 
       - name: Upload PR build artifact
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && (matrix.shard == 0 || matrix.shard == '')
         uses: actions/upload-artifact@v4
         with:
-          name: NereusSDR-pr${{ github.event.number }}-${{ matrix.name }}
+          # Strip the shard suffix from the artifact name so the Linux
+          # binary appears as "Linux x64" not "Linux x64 (1/4)".
+          name: NereusSDR-pr${{ github.event.number }}-${{ runner.os == 'Linux' && 'Linux x64' || matrix.name }}
           path: ${{ steps.locate.outputs.binary }}
           retention-days: 7
           if-no-files-found: warn
