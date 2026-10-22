@@ -13,6 +13,16 @@ there already. The telemetry graph has its own record in
 
 ## Upstream
 
+Regional band limits (2026-10-22): `src/models/BandPlanEdges.h` and
+`src/gui/SpectrumWidget.cpp` follow AetherSDR `src/models/BandDefs.h`,
+`BandPlanManager.cpp:21-34,176-224` and `SpectrumWidget.cpp:16229-16249`
+at local revision `e2e8c50c`. Identity windows group the selected plan's
+segments; missing regional allocations have no US fallback. NereusSDR
+uses Hz and its existing configurable red band-edge color. Lines are
+cosmetic, one pixel wide, and painted above the trace in CPU/GPU overlays,
+including when the band-plan strip is hidden. Jeremy Fielder KK7GWY
+(`ten9876`), project-level GPLv3; upstream files have no per-file headers.
+
 | Item | Source |
 | --- | --- |
 | Upstream project | [AetherSDR](https://github.com/ten9876/AetherSDR) |

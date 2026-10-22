@@ -1699,6 +1699,7 @@ public:
     // the scale drawn into a painter outside the live paintEvent().
     void drawFrequencyGridForTest(QPainter& painter, const QRect& rect) {
         drawGrid(painter, rect);
+        drawBandPlan(painter, rect);
     }
     double gridFreqStepHzForTest() const  { return gridFreqStepHz(); }
     // The dB values drawGrid() draws its horizontal lines at, bottom up.

@@ -8,6 +8,8 @@
 #include "core/AppSettings.h"
 #include "gui/SpectrumWidget.h"
 #include "models/Band.h"
+#include "models/BandPlanEdges.h"
+#include "models/BandPlanManager.h"
 using namespace NereusSDR;
 
 class TestDisplayBandEdges : public QObject {
@@ -30,7 +32,12 @@ private slots:
     }
 
     void actualFrequencyGridDrawsBandEdgeWithItsSelectedColor() {
+        BandPlanManager plans;
+        plans.loadPlans();
+        plans.setActivePlan(QStringLiteral("ARRL (US)"));
         SpectrumWidget pan;
+        pan.setBandPlanManager(&plans);
+        pan.setBandPlanFontSize(0);
         pan.setFrequencyRange(14'175'000, 500'000);
         pan.setGridColor(Qt::transparent);
         pan.setGridFineColor(Qt::transparent);
@@ -58,7 +65,12 @@ private slots:
     }
 
     void boundariesAtBothViewportEndsRemainVisible() {
+        BandPlanManager plans;
+        plans.loadPlans();
+        plans.setActivePlan(QStringLiteral("ARRL (US)"));
         SpectrumWidget pan;
+        pan.setBandPlanManager(&plans);
+        pan.setBandPlanFontSize(0);
         pan.setFrequencyRange(14'175'000, 350'000);
         pan.setGridColor(Qt::transparent);
         pan.setGridFineColor(Qt::transparent);
@@ -75,7 +87,10 @@ private slots:
     }
 
     void noBoundaryIsInventedOutsideHamCoverage() {
+        BandPlanManager plans;
+        plans.loadPlans();
         SpectrumWidget pan;
+        pan.setBandPlanManager(&plans);
         pan.setFrequencyRange(5'000'000, 10'000);
         pan.setGridColor(Qt::transparent);
         pan.setGridFineColor(Qt::transparent);
@@ -88,6 +103,52 @@ private slots:
         painter.end();
         for (int x = 0; x < image.width(); ++x) {
             QCOMPARE(image.pixelColor(x, 50), QColor(Qt::black));
+        }
+    }
+
+    void regionalEdgesComeFromTheSelectedPlan() {
+        BandPlanManager plans;
+        plans.loadPlans();
+        plans.setActivePlan(QStringLiteral("IARU Region 1"));
+        QCOMPARE(regionalBandEdgesHz(plans.segments(), 3'400'000, 4'100'000),
+                 (QVector<double>{3'500'000, 3'800'000}));
+        QCOMPARE(regionalBandEdgesHz(plans.segments(), 6'900'000, 7'400'000),
+                 (QVector<double>{7'000'000, 7'200'000}));
+        QCOMPARE(regionalBandEdgesHz(plans.segments(), 5'300'000, 5'500'000),
+                 (QVector<double>{5'351'500, 5'366'500}));
+        QVERIFY(regionalBandEdgesHz(plans.segments(), 0, 1'000'000).isEmpty());
+        plans.setActivePlan(QStringLiteral("ARRL (US)"));
+        QCOMPARE(regionalBandEdgesHz(plans.segments(), 3'400'000, 4'100'000),
+                 (QVector<double>{3'500'000, 4'000'000}));
+        QCOMPARE(regionalBandEdgesHz(plans.segments(), 100'000, 150'000),
+                 (QVector<double>{135'700, 137'800}));
+        QVERIFY(regionalBandEdgesHz({}, 0, 30'000'000).isEmpty());
+        QVERIFY(regionalBandEdgesHz(plans.segments(), 4'000'000, 3'000'000).isEmpty());
+    }
+
+    void regionSwitchMovesThinRedLinesWithBandStripHidden() {
+        BandPlanManager plans;
+        plans.loadPlans();
+        plans.setActivePlan(QStringLiteral("IARU Region 1"));
+        SpectrumWidget pan;
+        pan.setBandPlanManager(&plans);
+        pan.setBandPlanFontSize(0);
+        pan.setFrequencyRange(3'750'000, 1'000'000);
+        pan.setGridColor(Qt::transparent);
+        pan.setGridFineColor(Qt::transparent);
+        pan.setHGridColor(Qt::transparent);
+        QImage image(400, 100, QImage::Format_ARGB32_Premultiplied);
+        for (const bool us : {false, true}) {
+            if (us) { plans.setActivePlan(QStringLiteral("ARRL (US)")); }
+            image.fill(Qt::black);
+            QPainter painter(&image);
+            pan.drawFrequencyGridForTest(painter, image.rect());
+            painter.end();
+            QCOMPARE(image.pixelColor(100, 50), QColor(Qt::red));
+            QCOMPARE(image.pixelColor(us ? 300 : 220, 50), QColor(Qt::red));
+            QCOMPARE(image.pixelColor(us ? 220 : 300, 50), QColor(Qt::black));
+            QCOMPARE(image.pixelColor(99, 50), QColor(Qt::black));
+            QCOMPARE(image.pixelColor(101, 50), QColor(Qt::black));
         }
     }
 };

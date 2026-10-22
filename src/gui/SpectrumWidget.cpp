@@ -8,6 +8,7 @@
 //
 // =================================================================
 // Modification history (NereusSDR):
+//DH1KLM: 2026-10-22, OpenAI Codex: regional one-pixel band limits following AetherSDR [@e2e8c50c].
 //   2026-10-22  J.J. Boyd (KG4VCF), AI-assisted via Claude Code: a live
 //                 trace of a remote pan's row clock (starves, re-anchors,
 //                 two-row puts, paint gaps and a 10 s summary), gated on
@@ -561,6 +562,7 @@
 #include "dbm_strip_math.h"
 #include "popup_placement.h"
 #include "models/BandPlanManager.h"
+#include "models/BandPlanEdges.h"
 #include "models/Band.h"
 #include "models/DisplaySettingsModel.h"
 #include "models/NotchModel.h"
@@ -7671,20 +7673,6 @@ void SpectrumWidget::drawGrid(QPainter& p, const QRect& specRect)
         p.drawLine(x, specRect.top(), x, specRect.bottom());
     }
 
-    // Source boundaries are the existing models/Band.cpp union identity
-    // table. Reuse the normal one-pixel frequency-grid painter in CPU/GPU
-    // cached chrome; the selected shared Appearance color now has a consumer.
-    p.save();
-    p.setClipRect(specRect, Qt::IntersectClip);
-    p.setPen(QPen(m_bandEdgeColor, 1));
-    const QVector<double> edges = hamBandEdgesHz(m_centerHz - m_bandwidthHz / 2.0,
-                                               m_centerHz + m_bandwidthHz / 2.0);
-    for (const double edge : edges) {
-        const int x = qBound(specRect.left(), hzToX(edge, specRect), specRect.right());
-        p.drawLine(x, specRect.top(), x, specRect.bottom());
-    }
-    p.restore();
-
     drawExtendedIslandBounds(p, specRect);
 }
 
@@ -8625,6 +8613,23 @@ void SpectrumWidget::drawDbmScale3D(QPainter& p, const QRect& specRect,
 // From AetherSDR SpectrumWidget.cpp:4220-4293 [@0cd4559]
 void SpectrumWidget::drawBandPlan(QPainter& p, const QRect& specRect)
 {
+    //DH1KLM: AetherSDR SpectrumWidget.cpp:16229-16249 [@e2e8c50c]: regional lines above the trace.
+    if (m_bandPlanMgr && !specRect.isEmpty()) {
+        p.save();
+        p.setClipRect(specRect, Qt::IntersectClip);
+        p.setRenderHint(QPainter::Antialiasing, false);
+        QPen pen(m_bandEdgeColor);
+        pen.setWidth(1);
+        pen.setCosmetic(true);
+        p.setPen(pen);
+        const QVector<double> edges = regionalBandEdgesHz(m_bandPlanMgr->segments(),
+            m_centerHz - m_bandwidthHz / 2.0, m_centerHz + m_bandwidthHz / 2.0);
+        for (const double edge : edges) {
+            const int x = qBound(specRect.left(), hzToX(edge, specRect), specRect.right());
+            p.drawLine(x, specRect.top(), x, specRect.bottom());
+        }
+        p.restore();
+    }
     if (!m_bandPlanMgr || m_bandPlanFontSize <= 0) {
         return;
     }
