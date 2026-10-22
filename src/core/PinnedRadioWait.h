@@ -16,6 +16,7 @@
 #pragma once
 
 #include "core/RadioDiscovery.h"
+#include "core/NereusCoreExport.h"
 
 #include <QObject>
 #include <QPointer>
@@ -44,7 +45,8 @@ namespace NereusSDR {
 //                joined (the startup scan), that scan keeps running, so
 //                radios on later adapters still reach the list; the wait
 //                stops taking the radio and gives up when that scan ends.
-class PinnedRadioWait : public QObject {
+//DH1KLM: Export the Qt meta-object across the Windows Core/GUI DLL boundary.
+class NEREUS_CORE_EXPORT PinnedRadioWait : public QObject {
     Q_OBJECT
 public:
     // The backstop is kBackstopFactor times the scan's longest remaining
