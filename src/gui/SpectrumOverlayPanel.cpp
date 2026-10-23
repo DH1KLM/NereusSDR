@@ -4871,6 +4871,16 @@ void SpectrumOverlayPanel::mouseReleaseEvent(QMouseEvent* event) { event->accept
 // [-] = zoom out, [+] = zoom in.
 // From AetherSDR SpectrumOverlayMenu.cpp zoom controls section.
 
+void SpectrumOverlayPanel::setBandCenterState(bool active, bool enabled, const QString& reason)
+{
+    if (!m_zoomCenterBtn) { return; }
+    m_zoomCenterBtn->setChecked(active);
+    m_zoomCenterBtn->setEnabled(enabled);
+    m_zoomCenterBtn->setToolTip(reason.isEmpty()
+        ? QStringLiteral("Center band at the selected sample rate; click again to restore this band's previous view")
+        : reason);
+}
+
 void SpectrumOverlayPanel::buildZoomButtons()
 {
     // Parent: same spectrum widget as the panel (parentWidget())
@@ -4900,11 +4910,17 @@ void SpectrumOverlayPanel::buildZoomButtons()
 
     m_zoomSegBtn  = makeZBtn(QStringLiteral("S"));
     m_zoomBandBtn = makeZBtn(QStringLiteral("B"));
+    m_zoomCenterBtn = makeZBtn(QStringLiteral("C"));
+    m_zoomCenterBtn->setObjectName(QStringLiteral("bandCenterButton"));
+    m_zoomCenterBtn->setCheckable(true);
+    m_zoomCenterBtn->setStyleSheet(zoomStyle + QStringLiteral("QPushButton:checked { background: #0070a8; color: white; border: 1px solid #00c8ff; }"));
+    m_zoomCenterBtn->setToolTip(QStringLiteral("Center band at the selected sample rate; click again to restore this band's previous view"));
+    connect(m_zoomCenterBtn, &QPushButton::clicked, this, &SpectrumOverlayPanel::bandCenterRequested);
     m_zoomOutBtn  = makeZBtn(QStringLiteral("-"));
     m_zoomInBtn   = makeZBtn(QStringLiteral("+"));
 
     m_zoomSegBtn->setToolTip(QStringLiteral("Segment zoom: fit the band plan segment the slice is in"));
-    m_zoomBandBtn->setToolTip(QStringLiteral("Band zoom: fit the whole amateur band"));
+    m_zoomBandBtn->setToolTip(QStringLiteral("Band zoom within the current receiver capture; C centers the receiver on the band"));
     m_zoomOutBtn->setToolTip(QStringLiteral("Zoom out: show more bandwidth"));
     m_zoomInBtn->setToolTip(QStringLiteral("Zoom in: show less bandwidth"));
 
@@ -4915,7 +4931,7 @@ void SpectrumOverlayPanel::buildZoomButtons()
 
     // Lay out horizontally inside the strip
     int xOff = kZGap;
-    for (QPushButton* btn : {m_zoomSegBtn, m_zoomBandBtn, m_zoomOutBtn, m_zoomInBtn}) {
+    for (QPushButton* btn : {m_zoomSegBtn, m_zoomBandBtn, m_zoomCenterBtn, m_zoomOutBtn, m_zoomInBtn}) {
         btn->move(xOff, kZGap);
         xOff += kZBtnW + kZGap;
     }

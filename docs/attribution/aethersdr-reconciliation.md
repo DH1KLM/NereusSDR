@@ -1534,3 +1534,11 @@ The 3D-specific SpectrumWidget history and both shader headers carry
 complete project attribution. Both shader implementations and every
 original inline shader comment match the pinned AetherSDR source;
 NereusSDR adds attribution and its existing producer annotation.
+
+## Band center receive view (2026-10-23)
+
+| NereusSDR file | Classification | Source and adaptation |
+| --- | --- | --- |
+| `src/gui/spectrum/BandCenterView.h` | A | AetherSDR `src/core/backends/anan/AnanModel.h:74-116` at local revision `ab8c82b1`: receive envelope, filter-safe midpoint and before/view concept. Retains Nereus's selected rate and uses its uncropped ordinary viewport. GPLv3 attribution is in the header. |
+| `src/gui/spectrum/BandCenterController.cpp` | D | Original Nereus implementation. Design reference only: AetherSDR `AnanBackend.cpp:642-670,2519-2605` at `ab8c82b1`. Uses Nereus typed stream commands, per-pan/radio/band memory and RX-only completion; no backend or TX code is ported. |
+| `src/gui/spectrum/BandCenterController.h` | D | Original Nereus receive-view transaction interface. No upstream code or header; the required DH1KLM comment prefix is a contributor-marker false positive. |

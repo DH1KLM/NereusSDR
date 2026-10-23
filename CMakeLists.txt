@@ -2124,6 +2124,7 @@ set(GUI_SOURCES
     src/gui/HGauge.cpp
     src/gui/ColorSwatchButton.cpp
     src/gui/SpectrumOverlayPanel.cpp
+    src/gui/spectrum/BandCenterController.cpp
     src/gui/SetupDialog.cpp
     src/gui/UnbuiltFeatures.cpp
     src/gui/SetupPage.cpp

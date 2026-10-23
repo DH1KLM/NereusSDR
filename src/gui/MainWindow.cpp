@@ -1279,6 +1279,7 @@ warren@wpratt.com
 #  include <QWebSocket>
 #endif
 #include "SpectrumOverlayPanel.h"
+#include "spectrum/BandCenterController.h"
 #include "SetupDialog.h"
 #include "UnbuiltFeatures.h"
 // Remote-daemon R2 Task 20: the wss client and the settings backend it
@@ -7539,6 +7540,8 @@ void MainWindow::ensureOverlayPanels()
         connect(panel, &SpectrumOverlayPanel::zoomIn, sw, [sw]() { sw->zoomBy(1.0 / 1.5); });
         connect(panel, &SpectrumOverlayPanel::zoomSegment, sw, &SpectrumWidget::zoomToSegment);
         connect(panel, &SpectrumOverlayPanel::zoomBand, sw, &SpectrumWidget::zoomToBand);
+        //DH1KLM: Keep C's receive snapshots and pending operations local to this pan.
+        new BandCenterController(m_radioModel, sw, panel, [this, panId]() { return sliceForPan(panId); });
 
         // Band clicks act on this pan's active slice rather than the globally
         // active one, for the same reason (#118 fixed the mode-vs-frequency

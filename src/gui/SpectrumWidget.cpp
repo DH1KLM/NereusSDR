@@ -1241,10 +1241,10 @@ std::span<const int> displayBandEdges(int region)
     }
 }
 
-int currentBandEdgeRegion()
+int currentBandEdgeRegion(bool forceVisible = false)
 {
     //DH1KLM: The hidden sentinel also invalidates GPU chrome when the local switch changes.
-    if (AppSettings::instance().value(QStringLiteral("DisplayBandEdges"), QStringLiteral("True")).toString()
+    if (!forceVisible && AppSettings::instance().value(QStringLiteral("DisplayBandEdges"), QStringLiteral("True")).toString()
         != QStringLiteral("True")) { return -1; }
     bool valid = false;
     const int region = AppSettings::instance().value(QStringLiteral("BandPlanRegion"), 8).toString().toInt(&valid);
@@ -8715,7 +8715,7 @@ void SpectrumWidget::drawDbmScale3D(QPainter& p, const QRect& specRect,
 void SpectrumWidget::drawBandPlan(QPainter& p, const QRect& specRect)
 {
     //DH1KLM: Fixed Thetis regional boundaries, independent of the optional band-plan strip.
-    const int region = currentBandEdgeRegion();
+    const int region = currentBandEdgeRegion(m_bandCenterActive);
     if (region >= 0 && !specRect.isEmpty() && m_bandwidthHz > 0.0) {
         p.save();
         p.setClipRect(specRect, Qt::IntersectClip);
@@ -9771,10 +9771,15 @@ void SpectrumWidget::applyViewWindowForExtendedClamp(double bandwidthHz)
 
 void SpectrumWidget::applyOperatorZoom(double centreHz, double bandwidthHz)
 {
-    // The Ctrl+wheel branch of wheelEvent(), for a zoom button.
+    //DH1KLM: A zoom button updates presentation without emitting a hardware pan gesture.
     const double newBw = std::clamp(bandwidthHz, 1000.0, maxZoomOutBandwidthHz());
+    //DH1KLM: Never stretch a cropped DDC fragment across a viewport outside the available IQ.
+    if (m_sampleRateHz > 0.0 && newBw <= m_sampleRateHz) {
+        const double room = (m_sampleRateHz - newBw) / 2.0;
+        centreHz = std::clamp(centreHz, m_ddcCenterHz - room, m_ddcCenterHz + room);
+    }
     applyViewWindow(centreHz, newBw);
-    emit centerChanged(m_centerHz);
+    //DH1KLM: Zoom changes the viewport, never the VFO/DDC drag route or its RF filter selection.
     emit bandwidthChangeRequested(newBw);
     updateVfoPositions();
     recomputeExtendedMode();
@@ -9797,33 +9802,48 @@ void SpectrumWidget::zoomToSegment()
     const double vfoMhz = m_vfoHz / 1.0e6;
     for (const BandSegment& seg : m_bandPlanMgr->segments()) {
         if (vfoMhz >= seg.lowMhz && vfoMhz <= seg.highMhz && seg.highMhz > seg.lowMhz) {
-            applyOperatorZoom((seg.lowMhz + seg.highMhz) * 0.5e6,
-                              (seg.highMhz - seg.lowMhz) * 1.0e6);
+            //DH1KLM: B/S fit only captured IQ; they never request wideband filter bypass.
+            const double span = std::clamp((seg.highMhz - seg.lowMhz) * 1.0e6,
+                                           1000.0, std::max(1000.0, m_sampleRateHz));
+            const double room = std::max(0.0, (m_sampleRateHz - span) / 2.0);
+            applyOperatorZoom(std::clamp((seg.lowMhz + seg.highMhz) * 0.5e6,
+                                         m_ddcCenterHz - room, m_ddcCenterHz + room), span);
             return;
         }
     }
 }
 
+std::pair<double, double> SpectrumWidget::regionalBandBounds() const
+{
+    //DH1KLM: B uses the same fixed regional boundaries as the red lines, not the independent strip.
+    bool valid = false;
+    const int region = AppSettings::instance().value(QStringLiteral("BandPlanRegion"), 8).toString().toInt(&valid);
+    const auto edges = displayBandEdges(valid ? region : 8);
+    for (size_t index = 0; index + 1 < edges.size(); index += 2) {
+        const double low = edges[index];
+        const double high = edges[index + 1];
+        if (m_vfoHz < low || m_vfoHz > high) { continue; }
+        return {low, high};
+    }
+    return {0.0, 0.0};
+}
+
 void SpectrumWidget::zoomToBand()
 {
-    if (!m_bandPlanMgr) { return; }
-    const Band band = bandFromFrequency(m_vfoHz);
-    double lowMhz = 0.0;
-    double highMhz = 0.0;
-    for (const BandSegment& seg : m_bandPlanMgr->segments()) {
-        const double mid = (seg.lowMhz + seg.highMhz) * 0.5e6;
-        if (bandFromFrequency(mid) != band) { continue; }
-        if (highMhz <= lowMhz) {
-            lowMhz = seg.lowMhz;
-            highMhz = seg.highMhz;
-        } else {
-            lowMhz = std::min(lowMhz, seg.lowMhz);
-            highMhz = std::max(highMhz, seg.highMhz);
-        }
-    }
-    const double vfoMhz = m_vfoHz / 1.0e6;
-    if (highMhz <= lowMhz || vfoMhz < lowMhz || vfoMhz > highMhz) { return; }
-    applyOperatorZoom((lowMhz + highMhz) * 0.5e6, (highMhz - lowMhz) * 1.0e6);
+    const auto [low, high] = regionalBandBounds();
+    if (high <= low) { return; }
+    //DH1KLM: Keep the viewport inside the existing DDC, including an off-centre VFO.
+    const double span = std::clamp((high - low) * 1.04, 1000.0, std::max(1000.0, m_sampleRateHz));
+    const double room = std::max(0.0, (m_sampleRateHz - span) / 2.0);
+    applyOperatorZoom(std::clamp((low + high) / 2.0, m_ddcCenterHz - room, m_ddcCenterHz + room), span);
+}
+
+void SpectrumWidget::setBandCenterActive(bool active)
+{
+    if (m_bandCenterActive == active) { return; }
+    m_bandCenterActive = active;
+    markOverlayDirty();
+    update();
 }
 
 void SpectrumWidget::recomputeExtendedMode()
@@ -13986,19 +14006,8 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* event)
         double factor = 1.0 + dx * 0.003;  // 0.3% per pixel
         double newBw = m_bwDragStartBw * factor;
         newBw = std::clamp(newBw, 1000.0, maxZoomOutBandwidthHz());
-        // Recenter on VFO when zooming so the signal stays visible.
-        // Only emit centerChanged if center actually moved — avoids DDC retune per drag frame
-        const bool centreMoved = !qFuzzyCompare(m_centerHz, m_vfoHz);
-        applyViewWindow(centreMoved ? m_vfoHz : m_centerHz, newBw);
-        if (centreMoved) {
-            emit centerChanged(m_centerHz);
-        }
-        updateVfoPositions();
-#ifdef NEREUS_GPU_SPECTRUM
-        markOverlayDirty();
-#else
-        update();
-#endif
+        //DH1KLM: Scale dragging shares the view-only zoom path and keeps the allocator untouched.
+        applyOperatorZoom(m_vfoHz, newBw);
         return;
     }
 
@@ -14656,23 +14665,11 @@ void SpectrumWidget::wheelEvent(QWheelEvent* event)
         double factor = (delta > 0) ? 0.8 : 1.25;
         double newBw = m_bandwidthHz * factor;
         newBw = std::clamp(newBw, 1000.0, maxZoomOutBandwidthHz());
-        // Recenter on VFO when zooming
-        applyViewWindow(m_vfoHz, newBw);
-        {
-            const QScopedValueRollback<bool> zooming(m_wheelZoomRecentring, true);
-            emit centerChanged(m_centerHz);
-        }
-        emit bandwidthChangeRequested(newBw);
-        updateVfoPositions();
-        // This path writes m_bandwidthHz directly instead of going through
-        // setFrequencyRange, so it has to re-derive extended mode itself --
-        // otherwise zooming past the DDC with the wheel widens the window
-        // without ever asking the radio for the wideband stream that fills
-        // the wings.
-        recomputeExtendedMode();
-#ifdef NEREUS_GPU_SPECTRUM
-        markOverlayDirty();
-#endif
+        //DH1KLM: Wheel zoom changes the view, never the receiver's tuning or RF filters.
+        const QScopedValueRollback<bool> zooming(m_wheelZoomRecentring, true);
+        applyOperatorZoom(m_vfoHz, newBw);
+        event->accept();
+        return;
     } else if (event->modifiers() & Qt::ShiftModifier) {
         // Shift+scroll: adjust ref level
         float step = (delta > 0) ? 5.0f : -5.0f;
@@ -15674,7 +15671,7 @@ bool SpectrumWidget::prepareBackgroundLayer(QRhiResourceUpdateBatch* batch,
 void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb)
 {
     //DH1KLM: A region edit must replace cached GPU lines immediately, without waiting for a zoom.
-    const int region = currentBandEdgeRegion();
+    const int region = currentBandEdgeRegion(m_bandCenterActive);
     if (m_bandEdgeRegion != region) {
         m_bandEdgeRegion = region;
         markOverlayDirty();

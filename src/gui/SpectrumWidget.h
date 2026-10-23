@@ -626,15 +626,15 @@ public:
     // ---- Frequency range ----
     void setFrequencyRange(double centerHz, double bandwidthHz);
 
-    /// R-R3-21: the pan overlay's zoom buttons. zoomBy() scales the visible
-    /// span (factor > 1 zooms out); zoomToSegment() fits the band-plan
-    /// segment holding the VFO; zoomToBand() fits every segment of the
-    /// VFO's band. Each goes through the Ctrl+wheel zoom's path, so the
-    /// FFT replans and the wideband view follows as it does there. The
-    /// fits do nothing where the band plan has no segment under the VFO.
+    //DH1KLM: Zoom gestures only change the viewport and FFT plan. B/S stay within captured IQ;
+    //DH1KLM: B uses regional band edges, S the displayed segment. Neither moves the receiver.
     void zoomBy(double factor);
     void zoomToSegment();
     void zoomToBand();
+    //DH1KLM: Regional receive envelope and temporary visibility for the reversible C view.
+    std::pair<double, double> regionalBandBounds() const;
+    void setBandCenterActive(bool active);
+    bool bandCenterActive() const { return m_bandCenterActive; }
 
     /// Re-aim the display window WITHOUT touching waterfall history.
     ///
@@ -4249,6 +4249,7 @@ private:
     QColor m_txZeroLineColor{255, 184, 0};       // amber default (NereusSDR-original)
     QColor m_bandEdgeColor{255, 0, 0};           // red default (Thetis)
     int m_bandEdgeRegion{-1}; //DH1KLM: Region used by the cached GPU band-edge overlay.
+    bool m_bandCenterActive{false}; //DH1KLM: Forces markers without changing the Setup preference.
 
     // Plan 4 D9c-4: TNF + SubRX forward-compat scaffolding.  No paint yet.
     QColor m_tnfFilterColor  {255,  80,  80,  80};   // red translucent placeholder

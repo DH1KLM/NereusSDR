@@ -153,6 +153,8 @@ class NEREUS_GUI_EXPORT SpectrumOverlayPanel : public QWidget {
 
 public:
     explicit SpectrumOverlayPanel(QWidget* parent = nullptr);
+    //DH1KLM: C reflects the confirmed receive-view transaction, including refusals and TX holds.
+    void setBandCenterState(bool active, bool enabled, const QString& reason = {});
 
     /// TX rulings (JJ, 2026-09-30, item 3): this pan's slice is one this
     /// window only listens to (another device controls it), so the ATT
@@ -304,6 +306,7 @@ signals:
     // Zoom buttons
     void zoomSegment();
     void zoomBand();
+    void bandCenterRequested(bool active);
     void zoomOut();
     void zoomIn();
 
@@ -630,9 +633,10 @@ private:
     QString    m_attHeldReason;   // TX rulings (item 3)
 
     // ── Waterfall zoom buttons (bottom-left of spectrum widget) ──────────
-    QWidget*     m_zoomStrip{nullptr};   // container for the 4 zoom buttons
+    QWidget*     m_zoomStrip{nullptr};   //DH1KLM: Container for S, B, C, minus and plus.
     QPushButton* m_zoomSegBtn{nullptr};
     QPushButton* m_zoomBandBtn{nullptr};
+    QPushButton* m_zoomCenterBtn{nullptr}; //DH1KLM: Reversible band-centre toggle.
     QPushButton* m_zoomOutBtn{nullptr};
     QPushButton* m_zoomInBtn{nullptr};
 };

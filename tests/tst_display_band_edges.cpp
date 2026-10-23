@@ -11,6 +11,14 @@
 #include "models/BandPlanManager.h"
 #include "gui/setup/GeneralOptionsPage.h"
 #include <QCheckBox>
+#include <QPushButton>
+#include <QWheelEvent>
+#include <memory>
+#include "gui/SpectrumOverlayPanel.h"
+#include "gui/spectrum/BandCenterView.h"
+#include "gui/spectrum/BandCenterController.h"
+#include "models/RadioModel.h"
+#include "models/SliceModel.h"
 using namespace NereusSDR;
 
 class TestDisplayBandEdges : public QObject {
@@ -264,6 +272,181 @@ private slots:
         QVERIFY(!reopened.findChild<QCheckBox*>(QStringLiteral("chkDisplayBandEdges"))->isChecked());
     }
 
+    void bandAndSegmentZoomNeverEmitReceiverRetunes() {
+        BandPlanManager plans;
+        plans.loadPlans();
+        plans.setActivePlan(QStringLiteral("ARRL (US)"));
+        SpectrumWidget pan;
+        pan.setBandPlanManager(&plans);
+        pan.setSampleRate(384000);
+        pan.setDdcCenterFrequency(7'150'000);
+        pan.setLocalWidebandAvailable(true);
+        pan.setVfoFrequency(7'150'000);
+        AppSettings::instance().setValue(QStringLiteral("BandPlanRegion"), QStringLiteral("23"));
+        QSignalSpy retunes(&pan, &SpectrumWidget::centerChanged);
+        QSignalSpy demand(&pan, &SpectrumWidget::widebandExtensionStateChanged);
+        pan.zoomToBand();
+        QCOMPARE(pan.centerFrequency(), 7'100'000.0);
+        QCOMPARE(pan.bandwidth(), 208'000.0);
+        pan.zoomToSegment();
+        QCOMPARE(retunes.count(), 0);
+        QCOMPARE(demand.count(), 0);
+        QCOMPARE(pan.sampleRate(), 384'000.0);
+    }
+
+    void bandZoomCannotRequestWidebandOrStretchMissingIq() {
+        SpectrumWidget pan;
+        pan.setSampleRate(384000);
+        pan.setDdcCenterFrequency(3'550'000);
+        pan.setVfoFrequency(3'550'000);
+        pan.setLocalWidebandAvailable(true);
+        AppSettings::instance().setValue(QStringLiteral("BandPlanRegion"), QStringLiteral("8"));
+        QSignalSpy retunes(&pan, &SpectrumWidget::centerChanged);
+        QSignalSpy demand(&pan, &SpectrumWidget::widebandExtensionStateChanged);
+        pan.zoomToBand();
+        QCOMPARE(pan.bandwidth(), 384'000.0);
+        QCOMPARE(pan.centerFrequency(), 3'550'000.0);
+        QCOMPARE(retunes.count(), 0);
+        QCOMPARE(demand.count(), 0);
+    }
+
+    void centerPlannerUsesSelected384kWithoutMovingReceiveFrequency() {
+        const auto view = planBandCenter(14'000'000, 14'350'000, 14'214'200, 384000, 100, 3000);
+        QVERIFY(view.has_value());
+        QCOMPARE(view->centreHz, 14'175'000.0);
+        QCOMPARE(view->spanHz, 357'000.0);
+        QVERIFY(view->wholeBand);
+        const auto wide = planBandCenter(3'500'000, 4'000'000, 3'550'000, 384000, -3000, -100);
+        QVERIFY(wide.has_value());
+        QVERIFY(!wide->wholeBand);
+        QCOMPARE(wide->spanHz, 384'000.0);
+        QVERIFY(3'547'000 >= wide->centreHz - 384000 * 0.46);
+        QVERIFY(!planBandCenter(7'200'000, 7'000'000, 7'100'000, 384000, 100, 3000));
+        QVERIFY(!planBandCenter(7'000'000, 7'200'000, 7'300'000, 384000, 100, 3000));
+    }
+
+    void buttonAndWheelZoomKeepOffsetCaptureAndNeverRetune() {
+        SpectrumWidget pan;
+        pan.resize(800, 400);
+        pan.setSampleRate(384000);
+        pan.setDdcCenterFrequency(14'200'000);
+        pan.setVfoFrequency(14'380'000);
+        pan.setFrequencyRange(14'200'000, 384000);
+        pan.setLocalWidebandAvailable(true);
+        QSignalSpy retunes(&pan, &SpectrumWidget::centerChanged);
+        QSignalSpy demand(&pan, &SpectrumWidget::widebandExtensionStateChanged);
+        pan.zoomBy(0.8);
+        QVERIFY(pan.centerFrequency() + pan.bandwidth() / 2.0 <= 14'392'000);
+        QVERIFY(pan.centerFrequency() - pan.bandwidth() / 2.0 >= 14'008'000);
+        QWheelEvent wheel(QPointF(100, 50), QPointF(100, 50), QPoint(), QPoint(0, 120),
+                          Qt::NoButton, Qt::ControlModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(&pan, &wheel);
+        QVERIFY(wheel.isAccepted());
+        QVERIFY(pan.centerFrequency() + pan.bandwidth() / 2.0 <= 14'392'000);
+        QCOMPARE(retunes.count(), 0);
+        QCOMPARE(demand.count(), 0);
+        QCOMPARE(pan.ddcCenterFrequency(), 14'200'000.0);
+    }
+
+    void centerForcesBothLinesWithoutChangingSetupPreference() {
+        AppSettings::instance().setValue(QStringLiteral("DisplayBandEdges"), QStringLiteral("False"));
+        SpectrumWidget pan;
+        pan.setBandPlanFontSize(0);
+        pan.setFrequencyRange(14'175'000, 500000);
+        pan.setGridColor(Qt::transparent);
+        pan.setGridFineColor(Qt::transparent);
+        pan.setHGridColor(Qt::transparent);
+        pan.setBandEdgeColor(Qt::red);
+        const auto draw = [&]() {
+            QImage image(400, 100, QImage::Format_ARGB32_Premultiplied);
+            image.fill(Qt::black);
+            QPainter painter(&image);
+            pan.drawFrequencyGridForTest(painter, image.rect());
+            return image;
+        };
+        QCOMPARE(draw().pixelColor(60, 50), QColor(Qt::black));
+        pan.setBandCenterActive(true);
+        QCOMPARE(draw().pixelColor(60, 50), QColor(Qt::red));
+        QCOMPARE(draw().pixelColor(340, 50), QColor(Qt::red));
+        QCOMPARE(AppSettings::instance().value(QStringLiteral("DisplayBandEdges")).toString(), QStringLiteral("False"));
+        pan.setBandCenterActive(false);
+        QCOMPARE(draw().pixelColor(60, 50), QColor(Qt::black));
+    }
+
+    void centerToggleRestoresViewRateAndPinWithoutRetuningSlice() {
+        RadioModel model;
+        model.configureStreamPool(1, 1, 384000);
+        model.setConnectionStateForTest(ConnectionState::Connected);
+        const int id = model.addSlice();
+        auto* slice = model.sliceById(id);
+        QVERIFY(slice);
+        slice->setFrequency(14'214'200);
+        slice->setSampleRateHz(384000);
+        QVERIFY(model.requestStreamCentre(id, 14'214'200));
+        SpectrumWidget pan;
+        pan.setSampleRate(384000);
+        pan.setDdcCenterFrequency(14'214'200);
+        pan.setVfoFrequency(slice->frequency());
+        pan.setFrequencyRange(14'220'000, 120000);
+        SpectrumOverlayPanel panel(&pan);
+        auto controller = std::make_unique<BandCenterController>(&model, &pan, &panel, [&]() { return slice; });
+        auto* button = pan.findChild<QPushButton*>(QStringLiteral("bandCenterButton"));
+        QVERIFY(button);
+        int bandX = -1, minusX = -1;
+        for (auto* sibling : button->parentWidget()->findChildren<QPushButton*>(QString(), Qt::FindDirectChildrenOnly)) {
+            if (sibling->text() == QStringLiteral("B")) { bandX = sibling->x(); }
+            if (sibling->text() == QStringLiteral("-")) { minusX = sibling->x(); }
+        }
+        QVERIFY(bandX >= 0 && button->x() > bandX && button->x() < minusX);
+        QVERIFY(button->isEnabled());
+        const bool pin = model.streamCtunPinned(slice->streamIndex());
+        const bool paneCtun = pan.ctunEnabled();
+        const int low = slice->filterLow(), high = slice->filterHigh();
+        QSignalSpy tuning(slice, &SliceModel::frequencyChanged);
+        QSignalSpy displayRetunes(&pan, &SpectrumWidget::centerChanged);
+        QSignalSpy txChanges(&model, &RadioModel::transmittingChanged);
+        button->click();
+        QVERIFY(button->isChecked());
+        QVERIFY(pan.bandCenterActive());
+        QCOMPARE(pan.centerFrequency(), 14'175'000.0);
+        QCOMPARE(model.streamAllocator().streamCentreHz(slice->streamIndex()), 14'175'000.0);
+        //DH1KLM: Reconstruct the controller to exercise persisted before/view state, not just an in-memory toggle.
+        controller.reset();
+        controller = std::make_unique<BandCenterController>(&model, &pan, &panel, [&]() { return slice; });
+        QVERIFY(button->isChecked());
+        button->click();
+        QVERIFY(!button->isChecked());
+        QVERIFY(!pan.bandCenterActive());
+        QCOMPARE(pan.centerFrequency(), 14'220'000.0);
+        QCOMPARE(pan.bandwidth(), 120'000.0);
+        QCOMPARE(slice->sampleRateHz(), 384000);
+        QCOMPARE(model.streamAllocator().streamCentreHz(slice->streamIndex()), 14'214'200.0);
+        QCOMPARE(model.streamCtunPinned(slice->streamIndex()), pin);
+        QCOMPARE(pan.ctunEnabled(), paneCtun);
+        QCOMPARE(slice->filterLow(), low);
+        QCOMPARE(slice->filterHigh(), high);
+        QCOMPARE(tuning.count(), 0);
+        QCOMPARE(displayRetunes.count(), 0);
+        QCOMPARE(txChanges.count(), 0);
+        QVERIFY(!model.isTransmitting());
+
+        button->click();
+        slice->setFrequency(7'150'000);
+        pan.setVfoFrequency(7'150'000);
+        pan.setFrequencyRange(7'160'000, 80000);
+        QTRY_VERIFY(!button->isChecked());
+        button->click();
+        QVERIFY(button->isChecked());
+        slice->setFrequency(14'214'200);
+        pan.setVfoFrequency(14'214'200);
+        QTRY_VERIFY(button->isChecked());
+        QTRY_COMPARE(pan.centerFrequency(), 14'175'000.0);
+        button->click();
+        QTRY_VERIFY(!button->isChecked());
+        QCOMPARE(pan.centerFrequency(), 14'220'000.0);
+        QCOMPARE(pan.bandwidth(), 120'000.0);
+    }
+
     void nativeGpuRefreshesRegionWithoutZoom() {
 #ifdef NEREUS_GPU_SPECTRUM
         if (!qEnvironmentVariableIsSet("NEREUS_TEST_NATIVE_BAND_EDGES")) {
@@ -316,6 +499,11 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!(switched = pan.grabFramebuffer()).isNull() && !redAt(switched, 0.55), 10000);
         toggle->setChecked(true);
         QTRY_VERIFY_WITH_TIMEOUT(!(switched = pan.grabFramebuffer()).isNull() && redAt(switched, 0.55), 10000);
+        toggle->setChecked(false);
+        pan.setBandCenterActive(true);
+        QTRY_VERIFY_WITH_TIMEOUT(!(switched = pan.grabFramebuffer()).isNull() && redAt(switched, 0.55), 10000);
+        pan.setBandCenterActive(false);
+        QTRY_VERIFY_WITH_TIMEOUT(!(switched = pan.grabFramebuffer()).isNull() && !redAt(switched, 0.55), 10000);
         pan.close();
 #endif
     }

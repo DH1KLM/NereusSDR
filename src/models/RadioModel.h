@@ -2518,6 +2518,8 @@ public:
     /// their mirror optimistically. Returns whether the local operation, or
     /// remote send, was accepted.
     bool requestStreamCtunPinned(int sliceId, bool pinned);
+    //DH1KLM: Snapshot the actual stream pin without changing the operator's CTUN preference.
+    bool streamCtunPinned(int streamIndex) const;
 
     /// Move the bound stream's DDC centre explicitly. All cohosts must remain
     /// inside the target window or the request is refused without changes.
@@ -7339,7 +7341,6 @@ public:
     /// Push the current slice set for `streamIndex` to RxDspWorker and emit
     /// streamBindingsChanged. Called after every bind / unbind.
     void republishStreamBindings(int streamIndex);
-    bool streamCtunPinned(int streamIndex) const;
     void setStreamCtunPinned(int streamIndex, bool pinned);
     quint64 streamEpoch(int streamIndex) const;
     void setStreamEpoch(int streamIndex, quint64 epoch);

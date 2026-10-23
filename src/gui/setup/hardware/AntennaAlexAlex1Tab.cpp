@@ -375,6 +375,8 @@ AntennaAlexAlex1Tab::AntennaAlexAlex1Tab(RadioModel* model, QWidget* parent)
     // chkDisable6mLNAonTX: "TX" — default Checked                [@501e3f5:23700]
     // chkDisable6mLNAonRX: "RX"                                  [@501e3f5:23714]
     m_hpfBypass        = new QCheckBox(tr("HPF Bypass (master)"), hpfGroup);
+    //DH1KLM: This is the manual policy, not the automatic wideband bypass state.
+    m_hpfBypass->setToolTip(tr("Manual bypass override. Automatic receive bypass is shown by the live indicator."));
     m_hpfBypassOnTx    = new QCheckBox(tr("HPF Bypass on TX"), hpfGroup);
     m_hpfBypassOnPs    = new QCheckBox(tr("HPF Bypass on PureSignal feedback"), hpfGroup);
     m_disable6mLnaOnTx = new QCheckBox(tr("Disable 6m LNA on TX"), hpfGroup);
@@ -716,6 +718,9 @@ AntennaAlexAlex1Tab::AntennaAlexAlex1Tab(RadioModel* model, QWidget* parent)
         // The low-pass lamp follows the bits the radio has in use.
         connect(m_model, &RadioModel::alexLpfBitsChanged, this,
                 [this]() { updateActiveLeds(); });
+        //DH1KLM: Wideband/filter policy can change without a VFO frequency change.
+        connect(m_model, &RadioModel::filterStateChanged, this,
+                [this]() { updateActiveLeds(); });
     }
 
     // Recompute when the master bypass or any per-row bypass toggles so
@@ -801,7 +806,10 @@ void AntennaAlexAlex1Tab::updateActiveLeds()
     // HPF selection
     int hpfIdx = -1;
     const bool masterBypass = (m_hpfBypass && m_hpfBypass->isChecked());
-    if (masterBypass) {
+    const bool effectiveBypass = m_model
+        && (m_model->rxFilter0Effective() == int(AlexController::BpfEffective::Bypass)
+            || m_model->rxFilter0Effective() == int(AlexController::BpfEffective::WidebandLocked));
+    if (masterBypass || effectiveBypass) {
         hpfIdx = bypassRow;
     } else {
         for (std::size_t i = 0; i < m_hpfRows.size(); ++i) {
