@@ -508,6 +508,70 @@ private slots:
         QCOMPARE(pan.bandwidth(), 120'000.0);
     }
 
+    void centerReturnsFromOutsideBand_data() {
+        QTest::addColumn<double>("outside");
+        QTest::addColumn<bool>("alreadyActive");
+        QTest::addColumn<bool>("reload");
+        for (bool active : {false, true}) {
+            for (bool reload : {false, true}) {
+                QTest::newRow(qPrintable(QStringLiteral("below-active%1-reload%2").arg(active).arg(reload))) << 13'990'000.0 << active << reload;
+                QTest::newRow(qPrintable(QStringLiteral("above-active%1-reload%2").arg(active).arg(reload))) << 14'360'000.0 << active << reload;
+            }
+        }
+    }
+
+    void centerReturnsFromOutsideBand() {
+        QFETCH(double, outside);
+        QFETCH(bool, alreadyActive);
+        QFETCH(bool, reload);
+        RadioModel model;
+        model.configureStreamPool(1, 1, 384000);
+        model.setConnectionStateForTest(ConnectionState::Connected);
+        const int id = model.addSlice();
+        auto* slice = model.sliceById(id);
+        QVERIFY(slice);
+        constexpr double lastFrequency = 14'214'200;
+        slice->setFrequency(lastFrequency);
+        SpectrumWidget pan;
+        pan.setSampleRate(384000);
+        pan.setDdcCenterFrequency(lastFrequency);
+        pan.setVfoFrequency(lastFrequency);
+        pan.setFrequencyRange(lastFrequency, 120000);
+        SpectrumOverlayPanel panel(&pan);
+        auto controller = std::make_unique<BandCenterController>(&model, &pan, &panel, [&]() { return slice; });
+        auto* button = pan.findChild<QPushButton*>(QStringLiteral("bandCenterButton"));
+        QVERIFY(button);
+        if (alreadyActive) { button->click(); QVERIFY(button->isChecked()); }
+        slice->setFrequency(outside);
+        pan.setVfoFrequency(outside);
+        QCoreApplication::processEvents();
+        QCOMPARE(slice->frequency(), outside);
+        QVERIFY(button->isEnabled());
+        if (reload) {
+            controller.reset();
+            controller = std::make_unique<BandCenterController>(&model, &pan, &panel, [&]() { return slice; });
+        }
+        QSignalSpy tuning(slice, &SliceModel::frequencyChanged);
+        QSignalSpy displayRetunes(&pan, &SpectrumWidget::centerChanged);
+        QSignalSpy txChanges(&model, &RadioModel::transmittingChanged);
+        slice->setLocked(true);
+        button->click();
+        QCOMPARE(slice->frequency(), outside);
+        QCOMPARE(tuning.count(), 0);
+        slice->setLocked(false);
+        button->click();
+        QCOMPARE(slice->frequency(), lastFrequency);
+        QCOMPARE(pan.regionalBandBounds(), (std::pair<double, double>{14'000'000, 14'350'000}));
+        QCOMPARE(pan.centerFrequency(), 14'175'000.0);
+        QVERIFY(button->isChecked());
+        QCOMPARE(tuning.count(), 1);
+        QCOMPARE(displayRetunes.count(), 0);
+        QCOMPARE(txChanges.count(), 0);
+        button->click();
+        QVERIFY(!button->isChecked());
+        QCOMPARE(slice->frequency(), lastFrequency);
+    }
+
     void nativeGpuRefreshesRegionWithoutZoom() {
 #ifdef NEREUS_GPU_SPECTRUM
         if (!qEnvironmentVariableIsSet("NEREUS_TEST_NATIVE_BAND_EDGES")) {

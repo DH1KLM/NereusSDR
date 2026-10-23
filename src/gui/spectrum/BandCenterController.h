@@ -24,7 +24,7 @@ private:
         int rate{};
         bool ctun{}, extended{}, paneCtun{};
     };
-    struct Memory { View before{}, view{}; bool active{}; };
+    struct Memory { View before{}, view{}; bool active{}; double lastFrequency{}; };
     View snapshot() const;
     void followBand();
     void toggle(bool active);

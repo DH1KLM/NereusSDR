@@ -106,11 +106,28 @@ void BandCenterController::followBand()
     auto* slice = m_receiver();
     const auto [low, high] = m_pan->regionalBandBounds();
     const QString radio = m_model->currentRadioMac();
-    const QString band = slice && high > low && m_model->isConnected()
+    const bool insideBand = high > low;
+    const QString lastBandKey = slice ? QStringLiteral("DisplayBandCenterLast_%1_%2_%3_%4")
+        .arg(m_pan->panIndex()).arg(radio).arg(slice->sliceIndex())
+        .arg(AppSettings::instance().value(QStringLiteral("BandPlanRegion"), 8).toString()) : QString();
+    QString band = slice && insideBand && m_model->isConnected()
         ? QStringLiteral("%1/%2/%3/%4").arg(radio).arg(slice->sliceIndex()).arg(low, 0, 'f', 0).arg(high, 0, 'f', 0)
         : QString();
+    //DH1KLM: Preserve the receiver's last real band through general-coverage tuning, never guess a nearby band.
+    if (slice && !insideBand && m_model->isConnected()) {
+        const QString previous = AppSettings::instance().value(lastBandKey).toString();
+        if (previous.startsWith(QStringLiteral("%1/%2/").arg(radio).arg(slice->sliceIndex()))
+            && m_memory.contains(previous) && m_memory[previous].lastFrequency > 0.0) {
+            band = previous;
+            saveMemory();
+        }
+    }
+    if (!band.isEmpty() && insideBand) {
+        if (m_memory.contains(band)) { m_memory[band].lastFrequency = slice->frequency(); }
+        AppSettings::instance().setValue(lastBandKey, band);
+    }
     if (band == m_band) {
-        if (slice && !band.isEmpty() && m_memory[band].active && !m_pending.isActive()
+        if (slice && insideBand && !band.isEmpty() && m_memory[band].active && !m_pending.isActive()
             && !m_model->isTransmitting() && m_memory[band].view.rate != slice->sampleRateHz()) {
             const auto [rate, plan] = centeredCapture(m_pan, slice, m_model);
             if (plan) {
@@ -139,7 +156,8 @@ void BandCenterController::followBand()
     m_reason.clear();
     if (!band.isEmpty()) {
         if (!m_memory.contains(band)) { m_memory.insert(band, {snapshot(), snapshot(), false}); }
-        if (m_memory[band].active && !m_model->isTransmitting()) {
+        if (insideBand) { m_memory[band].lastFrequency = slice->frequency(); }
+        if (insideBand && m_memory[band].active && !m_model->isTransmitting()) {
             m_memory[band].active = false;
             const auto [rate, plan] = centeredCapture(m_pan, slice, m_model);
             if (plan) {
@@ -170,11 +188,34 @@ void BandCenterController::toggle(bool active)
         publish(QStringLiteral("Center view is unavailable for this receiver")); return;
     }
     auto& memory = m_memory[m_band];
-    if (active == memory.active) { publish(); return; }
+    const auto bounds = m_pan->regionalBandBounds();
+    const bool recovery = bounds.second <= bounds.first;
+    if (recovery) {
+        if (slice->locked() || !std::isfinite(memory.lastFrequency) || memory.lastFrequency <= 0.0) {
+            publish(QStringLiteral("Unlock the receiver to return to its last in-band frequency")); return;
+        }
+        for (auto* other : m_model->slices()) {
+            if (other != slice && other->streamIndex() == slice->streamIndex()) {
+                publish(QStringLiteral("Center view requires an unshared receive stream")); return;
+            }
+        }
+        if (!memory.active) { memory.before = snapshot(); }
+        const bool originalCtun = m_pan->ctunEnabled();
+        m_pan->applyRemoteCtunState(m_pan->ctunAvailable(), true);
+        //DH1KLM: This explicit out-of-band C action returns RX through its normal lock/listener guards.
+        slice->setFrequency(memory.lastFrequency);
+        if (slice->frequency() != memory.lastFrequency) {
+            m_pan->applyRemoteCtunState(m_pan->ctunAvailable(), originalCtun);
+            publish(QStringLiteral("Receiver refused the return to its last in-band frequency")); return;
+        }
+        m_pan->setVfoFrequency(memory.lastFrequency);
+        active = true;
+    }
+    if (!recovery && active == memory.active) { publish(); return; }
     if (!active) { apply(memory.before, false); return; }
     const auto [rate, plan] = centeredCapture(m_pan, slice, m_model);
     if (!plan) { publish(QStringLiteral("The receive passband cannot fit the selected sample rate")); return; }
-    memory.before = snapshot();
+    if (!recovery) { memory.before = snapshot(); }
     auto view = memory.before;
     view.rate = rate;
     view.centre = view.ddc = plan->centreHz;
@@ -261,7 +302,8 @@ void BandCenterController::saveMemory() const
         return QJsonArray{view.centre, view.span, view.ddc, view.rate, view.ctun, view.extended, view.paneCtun};
     };
     for (auto it = m_memory.cbegin(); it != m_memory.cend(); ++it) {
-        records.insert(it.key(), QJsonObject{{"before", encode(it->before)}, {"view", encode(it->view)}, {"active", it->active}});
+        records.insert(it.key(), QJsonObject{{"before", encode(it->before)}, {"view", encode(it->view)},
+            {"active", it->active}, {"lastFrequency", it->lastFrequency}});
     }
     AppSettings::instance().setValue(QStringLiteral("DisplayBandCenterMemory_%1").arg(m_pan->panIndex()),
         QString::fromUtf8(QJsonDocument(records).toJson(QJsonDocument::Compact)));
@@ -285,7 +327,15 @@ void BandCenterController::loadMemory()
         const auto record = it.value().toObject();
         const auto before = decode(record.value("before").toArray());
         const auto view = decode(record.value("view").toArray());
-        if (before && view) { m_memory.insert(it.key(), {*before, *view, record.value("active").toBool()}); }
+        if (before && view) {
+            double lastFrequency = record.value("lastFrequency").toDouble();
+            const auto parts = it.key().split('/');
+            if (parts.size() < 4 || !std::isfinite(lastFrequency)
+                || lastFrequency < parts[parts.size() - 2].toDouble() || lastFrequency > parts.last().toDouble()) {
+                lastFrequency = 0.0;
+            }
+            m_memory.insert(it.key(), {*before, *view, record.value("active").toBool(), lastFrequency});
+        }
     }
 }
 }
