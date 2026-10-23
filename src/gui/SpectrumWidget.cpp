@@ -8,7 +8,7 @@
 //
 // =================================================================
 // Modification history (NereusSDR):
-//DH1KLM: 2026-10-22, OpenAI Codex: regional one-pixel band limits following AetherSDR [@e2e8c50c].
+//DH1KLM: 2026-10-23, OpenAI Codex: fixed Thetis band edges follow BandPlanRegion and invalidate the GPU cache.
 //   2026-10-22  J.J. Boyd (KG4VCF), AI-assisted via Claude Code: a live
 //                 trace of a remote pan's row clock (starves, re-anchors,
 //                 two-row puts, paint gaps and a 10 s summary), gated on
@@ -458,7 +458,7 @@
 //
 //=================================================================
 // Waterfall AGC Modifications Copyright (C) 2013 Phil Harman (VK6APH)
-// Transitions to directX and continual modifications Copyright (C) 2020-2025 Richard Samphire (MW0LGE)
+// Transitions to directX and continual modifications Copyright (C) 2020-2026 Richard Samphire (MW0LGE)
 //=================================================================
 //
 //============================================================================================//
@@ -562,7 +562,7 @@
 #include "dbm_strip_math.h"
 #include "popup_placement.h"
 #include "models/BandPlanManager.h"
-#include "models/BandPlanEdges.h"
+#include <span>
 #include "models/Band.h"
 #include "models/DisplaySettingsModel.h"
 #include "models/NotchModel.h"
@@ -1149,6 +1149,104 @@ const QColor kPanDefaultTxFilterColor{255, 120, 60, 46};
 const QColor kPanDefaultRxFilterColor{0x00, 0xb4, 0xd8, 80};
 const QColor kPanDefaultTnfFilterColor{255, 80, 80, 80};
 const QColor kPanDefaultSubRxFilterColor{180, 0, 220, 80};
+
+//DH1KLM: From Thetis display.cs:103-208 [@852bf0ef]: fixed display edges, independent of zoom and band-plan labels.
+std::span<const int> displayBandEdges(int region)
+{
+    static constexpr int us[] = {
+        135700, 137800, 472000, 479000, 1800000, 2000000, 3500000, 4000000,
+        5330500, 5406400, 7000000, 7300000, 10100000, 10150000, 14000000, 14350000,
+        18068000, 18168000, 21000000, 21450000, 24890000, 24990000, 28000000, 29700000,
+        50000000, 54000000, 144000000, 148000000
+    };
+    static constexpr int germany[] = {
+        135700, 137800, 472000, 479000, 1810000, 2000000, 3500000, 3800000,
+        5351500, 5366500, 7000000, 7200000, 10100000, 10150000, 14000000, 14350000,
+        18068000, 18168000, 21000000, 21450000, 24890000, 24990000, 28000000, 29700000,
+        50000000, 51000000, 144000000, 146000000
+    };
+    static constexpr int region1[] = {
+        135700, 137800, 472000, 479000, 1810000, 2000000, 3500000, 3800000,
+        5351500, 5366500, 7000000, 7200000, 10100000, 10150000, 14000000, 14350000,
+        18068000, 18168000, 21000000, 21450000, 24890000, 24990000, 28000000, 29700000,
+        50000000, 54000000, 144000000, 146000000
+    };
+    static constexpr int region2[] = {
+        135700, 137800, 472000, 479000, 1800000, 2000000, 3500000, 4000000,
+        5351500, 5366500, 7000000, 7300000, 10100000, 10150000, 14000000, 14350000,
+        18068000, 18168000, 21000000, 21450000, 24890000, 24990000, 28000000, 29700000,
+        50000000, 54000000, 144000000, 148000000
+    };
+    static constexpr int region3[] = {
+        135700, 137800, 472000, 479000, 1800000, 2000000, 3500000, 3900000,
+        7000000, 7300000, 10100000, 10150000, 14000000, 14350000, 18068000, 18168000,
+        21000000, 21450000, 24890000, 24990000, 28000000, 29700000, 50000000, 54000000,
+        144000000, 148000000
+    };
+    static constexpr int spain[] = {
+        135700, 137800, 472000, 479000, 1810000, 1850000, 3500000, 3800000,
+        7000000, 7200000, 10100000, 10150000, 14000000, 14350000, 18068000, 18168000,
+        21000000, 21450000, 24890000, 24990000, 28000000, 29700000, 50000000, 52000000,
+        144000000, 148000000
+    };
+    static constexpr int australia[] = {
+        135700, 137800, 472000, 479000, 1800000, 1875000, 3500000, 3800000,
+        7000000, 7300000, 10100000, 10150000, 14000000, 14350000, 18068000, 18168000,
+        21000000, 21450000, 24890000, 24990000, 28000000, 29700000, 50000000, 54000000,
+        144000000, 148000000
+    };
+    static constexpr int uk[] = {
+        135700, 137800, 472000, 479000, 1810000, 2000000, 3500000, 3800000,
+        5258500, 5406500, 7000000, 7200000, 10100000, 10150000, 14000000, 14350000,
+        18068000, 18168000, 21000000, 21450000, 24890000, 24990000, 28000000, 29700000,
+        50000000, 52000000, 144000000, 148000000
+    };
+    static constexpr int india[] = {
+        1810000, 1860000, 3500000, 3900000, 7000000, 7200000, 10100000, 10150000,
+        14000000, 14350000, 18068000, 18168000, 21000000, 21450000, 24890000, 24990000,
+        28000000, 29700000, 50000000, 54000000, 144000000, 148000000
+    };
+    static constexpr int norway[] = {
+        1800000, 2000000, 3500000, 4000000, 5260000, 5410000, 7000000, 7300000,
+        10100000, 10150000, 14000000, 14350000, 18068000, 18168000, 21000000, 21450000,
+        24890000, 24990000, 28000000, 29700000, 50000000, 54000000, 144000000, 148000000
+    };
+    static constexpr int japan[] = {
+        135700, 137800, 472000, 479000, 1800000, 1875000, 1907500, 1912500,
+        3500000, 3575000, 3599000, 3612000, 3680000, 3687000, 3702000, 3716000,
+        3745000, 3770000, 3791000, 3805000, 7000000, 7200000, 10100000, 10150000,
+        14000000, 14350000, 18068000, 18168000, 21000000, 21450000, 24890000, 24990000,
+        28000000, 29700000, 50000000, 54000000, 144000000, 146000000
+    };
+    static constexpr int fallback[] = {
+        135700, 137800, 472000, 479000, 1800000, 2000000, 3500000, 4000000,
+        7000000, 7300000, 10100000, 10150000, 14000000, 14350000, 18068000, 18168000,
+        21000000, 21450000, 24890000, 24990000, 28000000, 29700000, 50000000, 54000000,
+        144000000, 148000000
+    };
+    //DH1KLM: IDs match General Options / Thetis setup.designer.cs:8084-8108 [v2.10.3.13].
+    switch (region) {
+    case 0: return australia;
+    case 2: return india;
+    case 5: return japan;
+    case 6: return spain;
+    case 7: return uk;
+    case 8: return us;
+    case 9: return norway;
+    case 20: return region1;
+    case 21: return region2;
+    case 22: return region3;
+    case 23: return germany;
+    default: return fallback;
+    }
+}
+
+int currentBandEdgeRegion()
+{
+    bool valid = false;
+    const int region = AppSettings::instance().value(QStringLiteral("BandPlanRegion"), 8).toString().toInt(&valid);
+    return valid && region >= 0 && region <= 23 ? region : 8;
+}
 
 QString panBoolText(bool value)
 {
@@ -8613,8 +8711,8 @@ void SpectrumWidget::drawDbmScale3D(QPainter& p, const QRect& specRect,
 // From AetherSDR SpectrumWidget.cpp:4220-4293 [@0cd4559]
 void SpectrumWidget::drawBandPlan(QPainter& p, const QRect& specRect)
 {
-    //DH1KLM: AetherSDR SpectrumWidget.cpp:16229-16249 [@e2e8c50c]: regional lines above the trace.
-    if (m_bandPlanMgr && !specRect.isEmpty()) {
+    //DH1KLM: Fixed Thetis regional boundaries, independent of the optional band-plan strip.
+    if (!specRect.isEmpty() && m_bandwidthHz > 0.0) {
         p.save();
         p.setClipRect(specRect, Qt::IntersectClip);
         p.setRenderHint(QPainter::Antialiasing, false);
@@ -8622,9 +8720,10 @@ void SpectrumWidget::drawBandPlan(QPainter& p, const QRect& specRect)
         pen.setWidth(1);
         pen.setCosmetic(true);
         p.setPen(pen);
-        const QVector<double> edges = regionalBandEdgesHz(m_bandPlanMgr->segments(),
-            m_centerHz - m_bandwidthHz / 2.0, m_centerHz + m_bandwidthHz / 2.0);
-        for (const double edge : edges) {
+        const double lowHz = m_centerHz - m_bandwidthHz / 2.0;
+        const double highHz = m_centerHz + m_bandwidthHz / 2.0;
+        for (const int edge : displayBandEdges(currentBandEdgeRegion())) {
+            if (edge < lowHz || edge > highHz) { continue; }
             const int x = qBound(specRect.left(), hzToX(edge, specRect), specRect.right());
             p.drawLine(x, specRect.top(), x, specRect.bottom());
         }
@@ -15570,6 +15669,13 @@ bool SpectrumWidget::prepareBackgroundLayer(QRhiResourceUpdateBatch* batch,
 
 void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb)
 {
+    //DH1KLM: A region edit must replace cached GPU lines immediately, without waiting for a zoom.
+    const int region = currentBandEdgeRegion();
+    if (m_bandEdgeRegion != region) {
+        m_bandEdgeRegion = region;
+        markOverlayDirty();
+    }
+
     const bool readableText = WorkspacePreview::enabled();
     if (m_readableTextCache != readableText) {
         m_readableTextCache = readableText;

@@ -4248,6 +4248,7 @@ private:
     QColor m_rxZeroLineColor{255, 0, 0};         // red default (Thetis convention)
     QColor m_txZeroLineColor{255, 184, 0};       // amber default (NereusSDR-original)
     QColor m_bandEdgeColor{255, 0, 0};           // red default (Thetis)
+    int m_bandEdgeRegion{-1}; //DH1KLM: Region used by the cached GPU band-edge overlay.
 
     // Plan 4 D9c-4: TNF + SubRX forward-compat scaffolding.  No paint yet.
     QColor m_tnfFilterColor  {255,  80,  80,  80};   // red translucent placeholder

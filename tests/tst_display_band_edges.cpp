@@ -8,7 +8,6 @@
 #include "core/AppSettings.h"
 #include "gui/SpectrumWidget.h"
 #include "models/Band.h"
-#include "models/BandPlanEdges.h"
 #include "models/BandPlanManager.h"
 using namespace NereusSDR;
 
@@ -106,24 +105,97 @@ private slots:
         }
     }
 
-    void regionalEdgesComeFromTheSelectedPlan() {
+    void regionSettingOverridesTheIndependentOverlayPlan() {
         BandPlanManager plans;
         plans.loadPlans();
-        plans.setActivePlan(QStringLiteral("IARU Region 1"));
-        QCOMPARE(regionalBandEdgesHz(plans.segments(), 3'400'000, 4'100'000),
-                 (QVector<double>{3'500'000, 3'800'000}));
-        QCOMPARE(regionalBandEdgesHz(plans.segments(), 6'900'000, 7'400'000),
-                 (QVector<double>{7'000'000, 7'200'000}));
-        QCOMPARE(regionalBandEdgesHz(plans.segments(), 5'300'000, 5'500'000),
-                 (QVector<double>{5'351'500, 5'366'500}));
-        QVERIFY(regionalBandEdgesHz(plans.segments(), 0, 1'000'000).isEmpty());
         plans.setActivePlan(QStringLiteral("ARRL (US)"));
-        QCOMPARE(regionalBandEdgesHz(plans.segments(), 3'400'000, 4'100'000),
-                 (QVector<double>{3'500'000, 4'000'000}));
-        QCOMPARE(regionalBandEdgesHz(plans.segments(), 100'000, 150'000),
-                 (QVector<double>{135'700, 137'800}));
-        QVERIFY(regionalBandEdgesHz({}, 0, 30'000'000).isEmpty());
-        QVERIFY(regionalBandEdgesHz(plans.segments(), 4'000'000, 3'000'000).isEmpty());
+        SpectrumWidget pan;
+        pan.setBandPlanManager(&plans);
+        pan.setBandPlanFontSize(0);
+        pan.setGridColor(Qt::transparent);
+        pan.setGridFineColor(Qt::transparent);
+        pan.setHGridColor(Qt::transparent);
+        AppSettings::instance().setValue(QStringLiteral("BandPlanRegion"), QStringLiteral("23"));
+        pan.setFrequencyRange(7'100'000, 400'000);
+        QImage image(400, 100, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::black);
+        QPainter painter(&image);
+        pan.drawFrequencyGridForTest(painter, image.rect());
+        painter.end();
+        QCOMPARE(image.pixelColor(100, 50), QColor(Qt::red));
+        QCOMPARE(image.pixelColor(300, 50), QColor(Qt::red));
+        QCOMPARE(image.pixelColor(399, 50), QColor(Qt::black));
+        plans.setActivePlan(QStringLiteral("IARU Region 3"));
+        QImage changed = image;
+        changed.fill(Qt::black);
+        QPainter second(&changed);
+        pan.drawFrequencyGridForTest(second, changed.rect());
+        second.end();
+        QCOMPARE(changed, image);
+    }
+
+    void zoomAndPanKeepTheSameAbsoluteBoundary() {
+        SpectrumWidget pan;
+        pan.setBandPlanFontSize(0);
+        pan.setGridColor(Qt::transparent);
+        pan.setGridFineColor(Qt::transparent);
+        pan.setHGridColor(Qt::transparent);
+        AppSettings::instance().setValue(QStringLiteral("BandPlanRegion"), QStringLiteral("23"));
+        for (const double bandwidth : {400'000.0, 200'000.0, 100'000.0, 40'000.0}) {
+            const double centre = 7'200'000.0 - bandwidth / 4.0;
+            pan.setFrequencyRange(centre, bandwidth);
+            QImage image(400, 100, QImage::Format_ARGB32_Premultiplied);
+            image.fill(Qt::black);
+            QPainter painter(&image);
+            pan.drawFrequencyGridForTest(painter, image.rect());
+            painter.end();
+            QCOMPARE(image.pixelColor(300, 50), QColor(Qt::red));
+            QCOMPARE(image.pixelColor(299, 50), QColor(Qt::black));
+            QCOMPARE(image.pixelColor(301, 50), QColor(Qt::black));
+            pan.setFrequencyRange(centre - bandwidth, bandwidth);
+            image.fill(Qt::black);
+            QPainter outside(&image);
+            pan.drawFrequencyGridForTest(outside, image.rect());
+            outside.end();
+            QCOMPARE(image.pixelColor(399, 50), QColor(Qt::black));
+        }
+    }
+
+    void regionBoundaries_data() {
+        QTest::addColumn<int>("region");
+        QTest::addColumn<double>("low");
+        QTest::addColumn<double>("high");
+        QTest::newRow("Germany-80m") << 23 << 3'500'000.0 << 3'800'000.0;
+        QTest::newRow("US-80m") << 8 << 3'500'000.0 << 4'000'000.0;
+        QTest::newRow("Region1-40m") << 20 << 7'000'000.0 << 7'200'000.0;
+        QTest::newRow("Region2-40m") << 21 << 7'000'000.0 << 7'300'000.0;
+        QTest::newRow("Region3-80m") << 22 << 3'500'000.0 << 3'900'000.0;
+        QTest::newRow("Germany-60m") << 23 << 5'351'500.0 << 5'366'500.0;
+        QTest::newRow("US-60m") << 8 << 5'330'500.0 << 5'406'400.0;
+        QTest::newRow("Germany-6m") << 23 << 50'000'000.0 << 51'000'000.0;
+        QTest::newRow("Spain-6m") << 6 << 50'000'000.0 << 52'000'000.0;
+        QTest::newRow("Germany-2m") << 23 << 144'000'000.0 << 146'000'000.0;
+        QTest::newRow("US-2m") << 8 << 144'000'000.0 << 148'000'000.0;
+    }
+
+    void regionBoundaries() {
+        QFETCH(int, region);
+        QFETCH(double, low);
+        QFETCH(double, high);
+        AppSettings::instance().setValue(QStringLiteral("BandPlanRegion"), QString::number(region));
+        SpectrumWidget pan;
+        pan.setBandPlanFontSize(0);
+        pan.setGridColor(Qt::transparent);
+        pan.setGridFineColor(Qt::transparent);
+        pan.setHGridColor(Qt::transparent);
+        pan.setFrequencyRange((low + high) / 2.0, (high - low) * 2.0);
+        QImage image(400, 100, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::black);
+        QPainter painter(&image);
+        pan.drawFrequencyGridForTest(painter, image.rect());
+        painter.end();
+        QCOMPARE(image.pixelColor(100, 50), QColor(Qt::red));
+        QCOMPARE(image.pixelColor(300, 50), QColor(Qt::red));
     }
 
     void regionSwitchMovesThinRedLinesWithBandStripHidden() {
@@ -139,7 +211,7 @@ private slots:
         pan.setHGridColor(Qt::transparent);
         QImage image(400, 100, QImage::Format_ARGB32_Premultiplied);
         for (const bool us : {false, true}) {
-            if (us) { plans.setActivePlan(QStringLiteral("ARRL (US)")); }
+            AppSettings::instance().setValue(QStringLiteral("BandPlanRegion"), us ? QStringLiteral("8") : QStringLiteral("23"));
             image.fill(Qt::black);
             QPainter painter(&image);
             pan.drawFrequencyGridForTest(painter, image.rect());
@@ -150,6 +222,52 @@ private slots:
             QCOMPARE(image.pixelColor(99, 50), QColor(Qt::black));
             QCOMPARE(image.pixelColor(101, 50), QColor(Qt::black));
         }
+    }
+
+    void nativeGpuRefreshesRegionWithoutZoom() {
+#ifdef NEREUS_GPU_SPECTRUM
+        if (!qEnvironmentVariableIsSet("NEREUS_TEST_NATIVE_BAND_EDGES")) {
+            QSKIP("Native GPU check requires an available Windows display.");
+        }
+        SpectrumWidget pan;
+        pan.resize(400, 250);
+        pan.setDbmScaleVisible(false);
+        pan.setBandPlanFontSize(0);
+        pan.setGridColor(Qt::transparent);
+        pan.setGridFineColor(Qt::transparent);
+        pan.setHGridColor(Qt::transparent);
+        pan.setFrequencyRange(3'750'000, 1'000'000);
+        AppSettings::instance().setValue(QStringLiteral("BandPlanRegion"), QStringLiteral("23"));
+        pan.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&pan));
+        QImage german;
+        QTRY_VERIFY_WITH_TIMEOUT(!(german = pan.grabFramebuffer()).isNull(), 10000);
+        const int y = qRound(pan.spectrumRectForTest().height() * german.height() / (2.0 * pan.height()));
+        const auto redAt = [y](const QImage& image, double fraction) {
+            const int x = qRound(image.width() * fraction);
+            for (int dx = -1; dx <= 1; ++dx) {
+                const QColor color = image.pixelColor(x + dx, y);
+                if (color.red() > 200 && color.green() < 60 && color.blue() < 60) { return true; }
+            }
+            return false;
+        };
+        QVERIFY(redAt(german, 0.55));
+        AppSettings::instance().setValue(QStringLiteral("BandPlanRegion"), QStringLiteral("8"));
+        pan.update();
+        QImage american;
+        QTRY_VERIFY_WITH_TIMEOUT(!(american = pan.grabFramebuffer()).isNull() && redAt(american, 0.75), 10000);
+        QVERIFY(!redAt(american, 0.55));
+        AppSettings::instance().setValue(QStringLiteral("BandPlanRegion"), QStringLiteral("23"));
+        pan.setFrequencyRange(7'210'000, 40'000);
+        QImage zoomed;
+        QTRY_VERIFY_WITH_TIMEOUT(!(zoomed = pan.grabFramebuffer()).isNull() && redAt(zoomed, 0.25), 10000);
+        QVERIFY(!redAt(zoomed, 0.75));
+        pan.setFrequencyRange(7'100'000, 40'000);
+        QImage inside;
+        QTRY_VERIFY_WITH_TIMEOUT(!(inside = pan.grabFramebuffer()).isNull() && !redAt(inside, 0.25), 10000);
+        QVERIFY(!redAt(inside, 0.75));
+        pan.close();
+#endif
     }
 };
 QTEST_MAIN(TestDisplayBandEdges)

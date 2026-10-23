@@ -13,15 +13,12 @@ there already. The telemetry graph has its own record in
 
 ## Upstream
 
-Regional band limits (2026-10-22): `src/models/BandPlanEdges.h` and
-`src/gui/SpectrumWidget.cpp` follow AetherSDR `src/models/BandDefs.h`,
-`BandPlanManager.cpp:21-34,176-224` and `SpectrumWidget.cpp:16229-16249`
-at local revision `e2e8c50c`. Identity windows group the selected plan's
-segments; missing regional allocations have no US fallback. NereusSDR
-uses Hz and its existing configurable red band-edge color. Lines are
-cosmetic, one pixel wide, and painted above the trace in CPU/GPU overlays,
-including when the band-plan strip is hidden. Jeremy Fielder KK7GWY
-(`ten9876`), project-level GPLv3; upstream files have no per-file headers.
+Regional band limits: the AetherSDR envelope adaptation from 2026-10-22
+was replaced on 2026-10-23 by Thetis display.cs's fixed regional display
+edges. The removed `src/models/BandPlanEdges.h` no longer derives limits
+from band-plan strip segments. The one-pixel painter retains the AetherSDR
+rendering pattern; table and region-selection attribution is recorded in
+`THETIS-PROVENANCE.md`.
 
 | Item | Source |
 | --- | --- |
