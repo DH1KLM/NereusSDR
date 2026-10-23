@@ -329,7 +329,7 @@ private slots:
         QTest::addColumn<double>("low");
         QTest::addColumn<double>("high");
         QTest::addColumn<int>("rate");
-        QTest::newRow("160m") << 1'810'000.0 << 2'000'000.0 << 384000;
+        QTest::newRow("160m-operator-choice") << 1'810'000.0 << 2'000'000.0 << 192000;
         QTest::newRow("80m") << 3'500'000.0 << 3'800'000.0 << 384000;
         QTest::newRow("60m") << 5'351'500.0 << 5'366'500.0 << 48000;
         QTest::newRow("40m") << 7'000'000.0 << 7'200'000.0 << 384000;
@@ -338,8 +338,8 @@ private slots:
         QTest::newRow("17m") << 18'068'000.0 << 18'168'000.0 << 192000;
         QTest::newRow("15m") << 21'000'000.0 << 21'450'000.0 << 768000;
         QTest::newRow("12m") << 24'890'000.0 << 24'990'000.0 << 192000;
-        QTest::newRow("10m-device-limit") << 28'000'000.0 << 29'700'000.0 << 1536000;
-        QTest::newRow("6m") << 50'000'000.0 << 51'000'000.0 << 1536000;
+        QTest::newRow("10m-operator-choice") << 28'000'000.0 << 29'700'000.0 << 768000;
+        QTest::newRow("6m-operator-choice") << 50'000'000.0 << 51'000'000.0 << 768000;
     }
 
     void automaticBandRates() {

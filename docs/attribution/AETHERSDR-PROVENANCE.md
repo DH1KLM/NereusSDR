@@ -63,3 +63,7 @@ The original controller follows Aether's before/view per-band design;
 it changes the RX capture through Nereus's typed commands without moving
 the slice frequency or modifying TX/PureSignal settings. The C toggle
 forces band markers temporarily and restores the separate Setup choice.
+
+Operator-selected C rate overrides (2026-10-23, DH1KLM): 160 m uses
+192 kHz; 10 m and 6 m use 768 kHz when supported. These explicit choices
+supersede the automatic full-band fit and can yield partial coverage.

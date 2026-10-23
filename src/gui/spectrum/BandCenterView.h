@@ -35,6 +35,14 @@ inline std::optional<BandCenterView> planBandCenter(double low, double high, dou
 inline int bandCenterSampleRate(double low, double high, double rx, int currentRate,
                                 int filterLow, int filterHigh, std::span<const int> allowed)
 {
+    //DH1KLM: Explicit operator choices take precedence, even when only part of the band fits.
+    const int preferred = (low == 1'810'000 || low == 1'800'000) ? 192000
+        : (low == 28'000'000 || low == 50'000'000) ? 768000 : 0;
+    if (preferred) {
+        for (int rate : allowed) {
+            if (rate == preferred && planBandCenter(low, high, rx, rate, filterLow, filterHigh)) { return rate; }
+        }
+    }
     //DH1KLM: Prefer the smallest actual device rate that captures both edges with display margin.
     int fitting = 0, widest = 0;
     for (int rate : allowed) {
