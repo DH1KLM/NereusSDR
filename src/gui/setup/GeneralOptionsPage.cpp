@@ -166,6 +166,8 @@
 #include <QPushButton>
 #include <QMessageBox>
 #include <QCheckBox>
+#include <QApplication>
+#include "gui/SpectrumWidget.h"
 #include <QComboBox>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -673,6 +675,22 @@ void GeneralOptionsPage::buildHardwareConfigGroup()
 
     regionRow->addWidget(regionLabel);
     regionRow->addWidget(m_comboFRSRegion);
+    //DH1KLM: Local display preference beside Region; independent of transmit edit availability.
+    auto* bandEdges = new QCheckBox(tr("Show Band edges"), group);
+    bandEdges->setObjectName(QStringLiteral("chkDisplayBandEdges"));
+    bandEdges->setProperty("nereusSetupId", "general.options.band_edges");
+    bandEdges->setToolTip(tr("Show red lines at the regional band limits."));
+    bandEdges->setChecked(s.value(QStringLiteral("DisplayBandEdges"), QStringLiteral("True")).toString()
+                         == QStringLiteral("True"));
+    connect(bandEdges, &QCheckBox::toggled, this, [](bool on) {
+        AppSettings::instance().setValue(QStringLiteral("DisplayBandEdges"),
+                                        on ? QStringLiteral("True") : QStringLiteral("False"));
+        for (QWidget* widget : QApplication::allWidgets()) {
+            if (auto* pan = qobject_cast<SpectrumWidget*>(widget)) { pan->update(); }
+        }
+    });
+    regionRow->addSpacing(16);
+    regionRow->addWidget(bandEdges);
     regionRow->addStretch();
     vbox->addLayout(regionRow);
 

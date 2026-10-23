@@ -9,6 +9,8 @@
 #include "gui/SpectrumWidget.h"
 #include "models/Band.h"
 #include "models/BandPlanManager.h"
+#include "gui/setup/GeneralOptionsPage.h"
+#include <QCheckBox>
 using namespace NereusSDR;
 
 class TestDisplayBandEdges : public QObject {
@@ -224,6 +226,44 @@ private slots:
         }
     }
 
+    void switchBesideRegionPersistsAndControlsLines() {
+        GeneralOptionsPage page(nullptr);
+        auto* toggle = page.findChild<QCheckBox*>(QStringLiteral("chkDisplayBandEdges"));
+        auto* region = page.findChild<QWidget*>(QStringLiteral("comboFRSRegion"));
+        QVERIFY(toggle);
+        QVERIFY(region);
+        QCOMPARE(toggle->parentWidget(), region->parentWidget());
+        QVERIFY(toggle->isEnabled());
+        QVERIFY(toggle->isChecked());
+        page.resize(700, 950);
+        page.show();
+        QCoreApplication::processEvents();
+        QVERIFY(toggle->geometry().left() > region->geometry().right());
+        QCOMPARE(toggle->geometry().center().y(), region->geometry().center().y());
+        SpectrumWidget pan;
+        pan.setBandPlanFontSize(0);
+        pan.setGridColor(Qt::transparent);
+        pan.setGridFineColor(Qt::transparent);
+        pan.setHGridColor(Qt::transparent);
+        pan.setFrequencyRange(3'750'000, 1'000'000);
+        AppSettings::instance().setValue(QStringLiteral("BandPlanRegion"), QStringLiteral("23"));
+        for (const bool enabled : {false, true}) {
+            toggle->setChecked(enabled);
+            QCOMPARE(AppSettings::instance().value(QStringLiteral("DisplayBandEdges")).toString(),
+                     enabled ? QStringLiteral("True") : QStringLiteral("False"));
+            QImage image(400, 100, QImage::Format_ARGB32_Premultiplied);
+            image.fill(Qt::black);
+            QPainter painter(&image);
+            pan.drawFrequencyGridForTest(painter, image.rect());
+            painter.end();
+            QCOMPARE(image.pixelColor(100, 50), QColor(enabled ? Qt::red : Qt::black));
+            QCOMPARE(image.pixelColor(220, 50), QColor(enabled ? Qt::red : Qt::black));
+        }
+        toggle->setChecked(false);
+        GeneralOptionsPage reopened(nullptr);
+        QVERIFY(!reopened.findChild<QCheckBox*>(QStringLiteral("chkDisplayBandEdges"))->isChecked());
+    }
+
     void nativeGpuRefreshesRegionWithoutZoom() {
 #ifdef NEREUS_GPU_SPECTRUM
         if (!qEnvironmentVariableIsSet("NEREUS_TEST_NATIVE_BAND_EDGES")) {
@@ -266,6 +306,16 @@ private slots:
         QImage inside;
         QTRY_VERIFY_WITH_TIMEOUT(!(inside = pan.grabFramebuffer()).isNull() && !redAt(inside, 0.25), 10000);
         QVERIFY(!redAt(inside, 0.75));
+        pan.setFrequencyRange(3'750'000, 1'000'000);
+        GeneralOptionsPage page(nullptr);
+        auto* toggle = page.findChild<QCheckBox*>(QStringLiteral("chkDisplayBandEdges"));
+        QVERIFY(toggle);
+        QImage switched;
+        QTRY_VERIFY_WITH_TIMEOUT(!(switched = pan.grabFramebuffer()).isNull() && redAt(switched, 0.55), 10000);
+        toggle->setChecked(false);
+        QTRY_VERIFY_WITH_TIMEOUT(!(switched = pan.grabFramebuffer()).isNull() && !redAt(switched, 0.55), 10000);
+        toggle->setChecked(true);
+        QTRY_VERIFY_WITH_TIMEOUT(!(switched = pan.grabFramebuffer()).isNull() && redAt(switched, 0.55), 10000);
         pan.close();
 #endif
     }

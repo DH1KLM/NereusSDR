@@ -1243,6 +1243,9 @@ std::span<const int> displayBandEdges(int region)
 
 int currentBandEdgeRegion()
 {
+    //DH1KLM: The hidden sentinel also invalidates GPU chrome when the local switch changes.
+    if (AppSettings::instance().value(QStringLiteral("DisplayBandEdges"), QStringLiteral("True")).toString()
+        != QStringLiteral("True")) { return -1; }
     bool valid = false;
     const int region = AppSettings::instance().value(QStringLiteral("BandPlanRegion"), 8).toString().toInt(&valid);
     return valid && region >= 0 && region <= 23 ? region : 8;
@@ -8712,7 +8715,8 @@ void SpectrumWidget::drawDbmScale3D(QPainter& p, const QRect& specRect,
 void SpectrumWidget::drawBandPlan(QPainter& p, const QRect& specRect)
 {
     //DH1KLM: Fixed Thetis regional boundaries, independent of the optional band-plan strip.
-    if (!specRect.isEmpty() && m_bandwidthHz > 0.0) {
+    const int region = currentBandEdgeRegion();
+    if (region >= 0 && !specRect.isEmpty() && m_bandwidthHz > 0.0) {
         p.save();
         p.setClipRect(specRect, Qt::IntersectClip);
         p.setRenderHint(QPainter::Antialiasing, false);
@@ -8722,7 +8726,7 @@ void SpectrumWidget::drawBandPlan(QPainter& p, const QRect& specRect)
         p.setPen(pen);
         const double lowHz = m_centerHz - m_bandwidthHz / 2.0;
         const double highHz = m_centerHz + m_bandwidthHz / 2.0;
-        for (const int edge : displayBandEdges(currentBandEdgeRegion())) {
+        for (const int edge : displayBandEdges(region)) {
             if (edge < lowHz || edge > highHz) { continue; }
             const int x = qBound(specRect.left(), hzToX(edge, specRect), specRect.right());
             p.drawLine(x, specRect.top(), x, specRect.bottom());
