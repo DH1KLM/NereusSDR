@@ -12,6 +12,17 @@
 #include <QJsonObject>
 
 namespace NereusSDR {
+namespace {
+std::pair<int, std::optional<BandCenterView>> centeredCapture(SpectrumWidget* pan, SliceModel* slice, RadioModel* model)
+{
+    const auto [low, high] = pan->regionalBandBounds();
+    const auto allowed = model->allowedStreamSampleRates();
+    const int rate = bandCenterSampleRate(low, high, slice->frequency(), slice->sampleRateHz(),
+        slice->filterLow(), slice->filterHigh(), std::span<const int>(allowed.data(), allowed.size()));
+    return {rate, planBandCenter(low, high, slice->frequency(), rate, slice->filterLow(), slice->filterHigh())};
+}
+}
+
 BandCenterController::BandCenterController(RadioModel* model, SpectrumWidget* pan,
     SpectrumOverlayPanel* panel, std::function<SliceModel*()> receiver)
     : QObject(panel), m_model(model), m_pan(pan), m_panel(panel), m_receiver(std::move(receiver))
@@ -83,7 +94,7 @@ void BandCenterController::publish(const QString& reason)
     const auto [low, high] = m_pan->regionalBandBounds();
     if (detail.isEmpty() && active && (low <= m_pan->centerFrequency() - m_pan->bandwidth() / 2.0
         || high >= m_pan->centerFrequency() + m_pan->bandwidth() / 2.0)) {
-        detail = QStringLiteral("Band exceeds the selected sample rate; only the captured part is shown. Click C to restore.");
+        detail = QStringLiteral("Band exceeds the supported receiver sample rates; only the captured part is shown. Click C to restore.");
     }
     m_panel->setBandCenterState(active, enabled,
         m_model->isTransmitting() ? QStringLiteral("Center view is held during transmit") : detail);
@@ -101,9 +112,10 @@ void BandCenterController::followBand()
     if (band == m_band) {
         if (slice && !band.isEmpty() && m_memory[band].active && !m_pending.isActive()
             && !m_model->isTransmitting() && m_memory[band].view.rate != slice->sampleRateHz()) {
-            const auto plan = planBandCenter(low, high, slice->frequency(), slice->sampleRateHz(), slice->filterLow(), slice->filterHigh());
+            const auto [rate, plan] = centeredCapture(m_pan, slice, m_model);
             if (plan) {
                 auto view = snapshot();
+                view.rate = rate;
                 view.centre = view.ddc = plan->centreHz;
                 view.span = plan->spanHz;
                 view.ctun = true;
@@ -129,14 +141,15 @@ void BandCenterController::followBand()
         if (!m_memory.contains(band)) { m_memory.insert(band, {snapshot(), snapshot(), false}); }
         if (m_memory[band].active && !m_model->isTransmitting()) {
             m_memory[band].active = false;
-            const auto plan = planBandCenter(low, high, slice->frequency(), slice->sampleRateHz(), slice->filterLow(), slice->filterHigh());
+            const auto [rate, plan] = centeredCapture(m_pan, slice, m_model);
             if (plan) {
                 auto view = m_memory[band].view;
-                if (view.rate != slice->sampleRateHz()) {
+                if (view.rate != rate) {
                     view = snapshot();
                     view.centre = view.ddc = plan->centreHz;
                     view.span = plan->spanHz;
                 }
+                view.rate = rate;
                 view.ctun = true;
                 view.paneCtun = true;
                 view.extended = false;
@@ -159,11 +172,11 @@ void BandCenterController::toggle(bool active)
     auto& memory = m_memory[m_band];
     if (active == memory.active) { publish(); return; }
     if (!active) { apply(memory.before, false); return; }
-    const auto [low, high] = m_pan->regionalBandBounds();
-    const auto plan = planBandCenter(low, high, slice->frequency(), slice->sampleRateHz(), slice->filterLow(), slice->filterHigh());
+    const auto [rate, plan] = centeredCapture(m_pan, slice, m_model);
     if (!plan) { publish(QStringLiteral("The receive passband cannot fit the selected sample rate")); return; }
     memory.before = snapshot();
     auto view = memory.before;
+    view.rate = rate;
     view.centre = view.ddc = plan->centreHz;
     view.span = plan->spanHz;
     view.ctun = true;
@@ -195,8 +208,15 @@ void BandCenterController::apply(View target, bool active)
     m_stream = slice->streamIndex();
     m_attempts = 0;
     m_pending.start();
-    //DH1KLM: C uses the selected rate. Only undo an explicit intervening rate change on toggle-off.
+    //DH1KLM: A rate reduction must not briefly enable wideband bypass before the new viewport is applied.
+    const View origin = snapshot();
+    m_applying = true;
+    m_pan->setExtendedViewAllowed(false);
+    m_applying = false;
+    //DH1KLM: Apply the device-supported band rate on C-on and the saved original rate on C-off.
     if (slice->sampleRateHz() != target.rate && !m_model->setStreamSampleRate(m_stream, target.rate)) {
+        m_pan->setExtendedViewAllowed(origin.extended);
+        m_pan->setDisplayWindowClamped(origin.centre, origin.span);
         m_pending.stop(); publish(QStringLiteral("Previous sample rate could not be restored")); return;
     }
     finish();

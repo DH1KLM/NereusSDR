@@ -55,8 +55,10 @@ ported logic.
 
 `src/gui/spectrum/BandCenterView.h` adapts the receive-envelope algorithm
 from local AetherSDR `src/core/backends/anan/AnanModel.h:74-116`
-(`ab8c82b1`, Jeremy Fielder KK7GWY, GPLv3). Nereus retains the selected
-DDC sample rate and its ordinary viewport has no additional 4% crop.
+(`ab8c82b1`, Jeremy Fielder KK7GWY, GPLv3). Nereus chooses the smallest supported DDC rate that fits both regional edges;
+its ordinary viewport has no additional 4% crop. The original rate is restored
+when C is switched off. A band wider than the maximum supported rate uses
+that maximum and reports partial coverage.
 The original controller follows Aether's before/view per-band design;
 it changes the RX capture through Nereus's typed commands without moving
 the slice frequency or modifying TX/PureSignal settings. The C toggle

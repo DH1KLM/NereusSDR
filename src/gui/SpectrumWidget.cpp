@@ -9772,7 +9772,8 @@ void SpectrumWidget::applyViewWindowForExtendedClamp(double bandwidthHz)
 void SpectrumWidget::applyOperatorZoom(double centreHz, double bandwidthHz)
 {
     //DH1KLM: A zoom button updates presentation without emitting a hardware pan gesture.
-    const double newBw = std::clamp(bandwidthHz, 1000.0, maxZoomOutBandwidthHz());
+    //DH1KLM: Display zoom must not acquire wideband IQ and switch the receive preselector.
+    const double newBw = std::clamp(bandwidthHz, 1000.0, std::max(1000.0, m_sampleRateHz));
     //DH1KLM: Never stretch a cropped DDC fragment across a viewport outside the available IQ.
     if (m_sampleRateHz > 0.0 && newBw <= m_sampleRateHz) {
         const double room = (m_sampleRateHz - newBw) / 2.0;

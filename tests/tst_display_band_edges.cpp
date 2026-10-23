@@ -325,6 +325,38 @@ private slots:
         QVERIFY(!planBandCenter(7'000'000, 7'200'000, 7'300'000, 384000, 100, 3000));
     }
 
+    void automaticBandRates_data() {
+        QTest::addColumn<double>("low");
+        QTest::addColumn<double>("high");
+        QTest::addColumn<int>("rate");
+        QTest::newRow("160m") << 1'810'000.0 << 2'000'000.0 << 384000;
+        QTest::newRow("80m") << 3'500'000.0 << 3'800'000.0 << 384000;
+        QTest::newRow("60m") << 5'351'500.0 << 5'366'500.0 << 48000;
+        QTest::newRow("40m") << 7'000'000.0 << 7'200'000.0 << 384000;
+        QTest::newRow("30m") << 10'100'000.0 << 10'150'000.0 << 96000;
+        QTest::newRow("20m") << 14'000'000.0 << 14'350'000.0 << 384000;
+        QTest::newRow("17m") << 18'068'000.0 << 18'168'000.0 << 192000;
+        QTest::newRow("15m") << 21'000'000.0 << 21'450'000.0 << 768000;
+        QTest::newRow("12m") << 24'890'000.0 << 24'990'000.0 << 192000;
+        QTest::newRow("10m-device-limit") << 28'000'000.0 << 29'700'000.0 << 1536000;
+        QTest::newRow("6m") << 50'000'000.0 << 51'000'000.0 << 1536000;
+    }
+
+    void automaticBandRates() {
+        QFETCH(double, low);
+        QFETCH(double, high);
+        QFETCH(int, rate);
+        const int supported[]{1536000, 192000, 48000, 768000, 96000, 384000};
+        const double rx = (low + high) / 2.0;
+        QCOMPARE(bandCenterSampleRate(low, high, rx, 192000, 100, 3000, supported), rate);
+        const auto view = planBandCenter(low, high, rx, rate, 100, 3000);
+        QVERIFY(view.has_value());
+        QVERIFY(view->spanHz <= rate);
+        if (high - low < rate * 0.9) { QVERIFY(view->wholeBand); }
+        const int restricted[]{48000, 96000, 192000};
+        QVERIFY(bandCenterSampleRate(low, high, rx, 192000, 100, 3000, restricted) <= 192000);
+    }
+
     void buttonAndWheelZoomKeepOffsetCaptureAndNeverRetune() {
         SpectrumWidget pan;
         pan.resize(800, 400);
@@ -346,6 +378,35 @@ private slots:
         QCOMPARE(retunes.count(), 0);
         QCOMPARE(demand.count(), 0);
         QCOMPARE(pan.ddcCenterFrequency(), 14'200'000.0);
+    }
+
+    void bandThenMinusCannotReenableWidebandBypassAt192k() {
+        SpectrumWidget pan;
+        pan.resize(800, 400);
+        pan.setSampleRate(192000);
+        pan.setDdcCenterFrequency(14'225'000);
+        pan.setVfoFrequency(14'225'000);
+        pan.setLocalWidebandAvailable(true);
+        pan.setFrequencyRange(14'225'000, 675000);
+        QVERIFY(pan.extendedMode());
+        QSignalSpy retunes(&pan, &SpectrumWidget::centerChanged);
+        QSignalSpy demand(&pan, &SpectrumWidget::widebandExtensionStateChanged);
+        pan.zoomToBand();
+        QCOMPARE(pan.bandwidth(), 192'000.0);
+        QVERIFY(!pan.extendedMode());
+        QCOMPARE(demand.count(), 1);
+        QCOMPARE(demand.first().first().toBool(), false);
+        demand.clear();
+        pan.zoomBy(1.5);
+        QCOMPARE(pan.bandwidth(), 192'000.0);
+        QVERIFY(!pan.extendedMode());
+        QWheelEvent wheel(QPointF(100, 50), QPointF(100, 50), QPoint(), QPoint(0, -120),
+                          Qt::NoButton, Qt::ControlModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(&pan, &wheel);
+        QCOMPARE(pan.bandwidth(), 192'000.0);
+        QCOMPARE(demand.count(), 0);
+        QCOMPARE(retunes.count(), 0);
+        QCOMPARE(pan.ddcCenterFrequency(), 14'225'000.0);
     }
 
     void centerForcesBothLinesWithoutChangingSetupPreference() {

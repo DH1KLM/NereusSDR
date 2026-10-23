@@ -4877,7 +4877,7 @@ void SpectrumOverlayPanel::setBandCenterState(bool active, bool enabled, const Q
     m_zoomCenterBtn->setChecked(active);
     m_zoomCenterBtn->setEnabled(enabled);
     m_zoomCenterBtn->setToolTip(reason.isEmpty()
-        ? QStringLiteral("Center band at the selected sample rate; click again to restore this band's previous view")
+        ? QStringLiteral("Center band using the smallest suitable receiver sample rate; click again to restore this band's previous view")
         : reason);
 }
 
@@ -4914,7 +4914,7 @@ void SpectrumOverlayPanel::buildZoomButtons()
     m_zoomCenterBtn->setObjectName(QStringLiteral("bandCenterButton"));
     m_zoomCenterBtn->setCheckable(true);
     m_zoomCenterBtn->setStyleSheet(zoomStyle + QStringLiteral("QPushButton:checked { background: #0070a8; color: white; border: 1px solid #00c8ff; }"));
-    m_zoomCenterBtn->setToolTip(QStringLiteral("Center band at the selected sample rate; click again to restore this band's previous view"));
+    m_zoomCenterBtn->setToolTip(QStringLiteral("Center band using the smallest suitable receiver sample rate; click again to restore this band's previous view"));
     connect(m_zoomCenterBtn, &QPushButton::clicked, this, &SpectrumOverlayPanel::bandCenterRequested);
     m_zoomOutBtn  = makeZBtn(QStringLiteral("-"));
     m_zoomInBtn   = makeZBtn(QStringLiteral("+"));
